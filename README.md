@@ -1,5 +1,8 @@
 # Nyxus Core
 
+<img width="2816" height="1536" alt="Nyxus-Logo" src="https://github.com/user-attachments/assets/3183b1b3-69b5-4a85-8aaf-811bd9c3bc79" />
+
+
 Nyxus is an enterprise-grade, baremetal network exploitation and terminal graphics framework engineered specifically for ESP32/Xtensa silicon. It completely bypasses standard high-level network stacks, utilizing direct DMA transfers, LwIP raw sockets, and custom zero-allocation memory structures to maximize execution speed and protect SRAM.
 
 > **Status:** Private / Active Development. 
