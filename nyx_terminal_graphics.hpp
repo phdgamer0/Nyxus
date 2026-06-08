@@ -1,19 +1,41 @@
 /**
- *     _  _         _____                     _______  _ 
- *    ( )( (    /| / ___ \ |\     /||\     /|(  ____ \( )
- *    | ||  \  ( |( (   ) )( \   / )| )   ( || (    \/| |
- *    (_)|   \ | |( (___) | \ (_) / | |   | || (_____ (_)
- *     _ | (\ \) | \____  |  ) _ (  | |   | |(_____  ) _ 
- *    ( )| | \   |      ) | / ( ) \ | |   | |      ) |( )
- *    | || )  \  |/\____) )( /   \ )| (___) |/\____) || |
- *    (_)|/    )_)\______/ |/     \|(_______)\_______)(_)
- *                                                       
- */
+*     _  _         _____                     _______  _ 
+*    ( )( (    /| / ___ \ |\     /||\     /|(  ____ \( )
+*    | ||  \  ( |( (   ) )( \   / )| )   ( || (    \/| |
+*    (_)|   \ | |( (___) | \ (_) / | |   | || (_____ (_)
+*     _ | (\ \) | \____  |  ) _ (  | |   | |(_____  ) _ 
+*    ( )| | \   |      ) | / ( ) \ | |   | |      ) |( )
+*    | || )  \  |/\____) )( /   \ )| (___) |/\____) || |
+*    (_)|/    )_)\______/ |/     \|(_______)\_______)(_)
+*                                                       
+*/
+/*  
+*  Nyxus Source-Available Non-Derivative License
+*  Copyright (c) 2026 Yazdan Samari
+*  Permission is hereby granted, free of charge, to any person obtaining a copy
+*  of this software and associated documentation files (the "Software"), to use
+*  and compile the Software for personal or internal purposes, subject to the 
+*  following conditions:
+*  1. NO MODIFICATION: You may not modify, alter, translate, or create derivative 
+*     works of the Software.
+*  2. NO REDISTRIBUTION OF MODIFIED COPIES: You may not publish, distribute, 
+*     sublicense, or sell modified versions of the Software.
+*  3. ATTRIBUTION: The above copyright notice and this permission notice shall be 
+*     included in all copies or substantial portions of the Software.
+*  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+*  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+*  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+*  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+*  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+*  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+*  SOFTWARE.
+*/
 #pragma once
 #ifndef _NYXUS_TERMINAL_GRAPHICS_HPP_
 #define _NYXUS_TERMINAL_GRAPHICS_HPP_
 #include <cstdint>
 #include <utility>
+#include <string.h>
 
 namespace Color{
    inline constexpr const char* RESET       = "\033[000;000;000;000;000m";
@@ -48,6 +70,14 @@ namespace Color{
    inline constexpr const char* NVIMBLUE    = "\033[038;002;130;170;255m";
    inline constexpr const char* NVIMPURPLE  = "\033[038;002;192;153;255m";
    inline constexpr const char* NVIMDARK    = "\033[038;002;034;036;054m";
+   const char* COLOR(const uint8_t& R, const uint8_t& G, const uint8_t& B){
+      return  "\033[038;002;" + ('0' + R / 100) + ('0' + (R / 10) % 10) + ('0' + R % 10) + ';' + ('0' + G / 100) + ('0' + (G / 10) % 10) + ('0' + G % 10) + ';' + ('0' + B / 100) + ('0' + (B / 10) % 10) + ('0' + B % 10) + 'm';
+   }
+   const char* TOCOLR(const char* BG){
+      char* __BGDUP = strdup(BG);
+      __BGDUP[3] = '3';
+      return __BGDUP;
+   }
 }
 
 namespace BgColor{
@@ -83,6 +113,14 @@ namespace BgColor{
    inline constexpr const char* NVIMBLUE    = "\033[048;002;130;170;255m";
    inline constexpr const char* NVIMPURPLE  = "\033[048;002;192;153;255m";
    inline constexpr const char* NVIMDARK    = "\033[048;002;034;036;054m";
+   const char* COLOR(const uint8_t& R, const uint8_t& G, const uint8_t& B){
+      return  "\033[048;002;" + ('0' + R / 100) + ('0' + (R / 10) % 10) + ('0' + R % 10) + ';' + ('0' + G / 100) + ('0' + (G / 10) % 10) + ('0' + G % 10) + ';' + ('0' + B / 100) + ('0' + (B / 10) % 10) + ('0' + B % 10) + 'm';
+   }
+   const char* TOCOLR(const char* CL){
+      char* __CLDUP = strdup(CL);
+      __CLDUP[3] = '4';
+      return __CLDUP;
+   }
 }
 
 /**

@@ -1,14 +1,35 @@
 /**
- *     _  _         _____                     _______  _ 
- *    ( )( (    /| / ___ \ |\     /||\     /|(  ____ \( )
- *    | ||  \  ( |( (   ) )( \   / )| )   ( || (    \/| |
- *    (_)|   \ | |( (___) | \ (_) / | |   | || (_____ (_)
- *     _ | (\ \) | \____  |  ) _ (  | |   | |(_____  ) _ 
- *    ( )| | \   |      ) | / ( ) \ | |   | |      ) |( )
- *    | || )  \  |/\____) )( /   \ )| (___) |/\____) || |
- *    (_)|/    )_)\______/ |/     \|(_______)\_______)(_)
- *                                                       
- */
+*     _  _         _____                     _______  _ 
+*    ( )( (    /| / ___ \ |\     /||\     /|(  ____ \( )
+*    | ||  \  ( |( (   ) )( \   / )| )   ( || (    \/| |
+*    (_)|   \ | |( (___) | \ (_) / | |   | || (_____ (_)
+*     _ | (\ \) | \____  |  ) _ (  | |   | |(_____  ) _ 
+*    ( )| | \   |      ) | / ( ) \ | |   | |      ) |( )
+*    | || )  \  |/\____) )( /   \ )| (___) |/\____) || |
+*    (_)|/    )_)\______/ |/     \|(_______)\_______)(_)
+*                                                       
+*/
+/*  
+*  Nyxus Source-Available Non-Derivative License
+*  Copyright (c) 2026 Yazdan Samari
+*  Permission is hereby granted, free of charge, to any person obtaining a copy
+*  of this software and associated documentation files (the "Software"), to use
+*  and compile the Software for personal or internal purposes, subject to the 
+*  following conditions:
+*  1. NO MODIFICATION: You may not modify, alter, translate, or create derivative 
+*     works of the Software.
+*  2. NO REDISTRIBUTION OF MODIFIED COPIES: You may not publish, distribute, 
+*     sublicense, or sell modified versions of the Software.
+*  3. ATTRIBUTION: The above copyright notice and this permission notice shall be 
+*     included in all copies or substantial portions of the Software.
+*  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+*  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+*  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+*  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+*  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+*  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+*  SOFTWARE.
+*/
 #pragma once
 #ifndef _NYXUS_NETWORK_TYPES_HPP_
 #define _NYXUS_NETWORK_TYPES_HPP_
