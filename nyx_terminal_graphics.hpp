@@ -70,15 +70,10 @@ namespace Color{
    inline constexpr const char* NVIMBLUE    = "\033[038;002;130;170;255m";
    inline constexpr const char* NVIMPURPLE  = "\033[038;002;192;153;255m";
    inline constexpr const char* NVIMDARK    = "\033[038;002;034;036;054m";
-   const char* COLOR(const uint8_t& R, const uint8_t& G, const uint8_t& B){
-      return  "\033[038;002;" + ('0' + R / 100) + ('0' + (R / 10) % 10) + ('0' + R % 10) + ';' + ('0' + G / 100) + ('0' + (G / 10) % 10) + ('0' + G % 10) + ';' + ('0' + B / 100) + ('0' + (B / 10) % 10) + ('0' + B % 10) + 'm';
-   }
-   const char* TOCOLR(const char* BG){
-      char* __BGDUP = strdup(BG);
-      __BGDUP[3] = '3';
-      return __BGDUP;
-   }
+   static inline const char* COLOR(const uint8_t& R, const uint8_t& G, const uint8_t& B);
+   static inline const char* TOCOLR(const char* BG);
 }
+
 
 namespace BgColor{
    inline constexpr const char* RESET       = "\033[000;000;000;000;000m";
@@ -113,14 +108,8 @@ namespace BgColor{
    inline constexpr const char* NVIMBLUE    = "\033[048;002;130;170;255m";
    inline constexpr const char* NVIMPURPLE  = "\033[048;002;192;153;255m";
    inline constexpr const char* NVIMDARK    = "\033[048;002;034;036;054m";
-   const char* COLOR(const uint8_t& R, const uint8_t& G, const uint8_t& B){
-      return  "\033[048;002;" + ('0' + R / 100) + ('0' + (R / 10) % 10) + ('0' + R % 10) + ';' + ('0' + G / 100) + ('0' + (G / 10) % 10) + ('0' + G % 10) + ';' + ('0' + B / 100) + ('0' + (B / 10) % 10) + ('0' + B % 10) + 'm';
-   }
-   const char* TOCOLR(const char* CL){
-      char* __CLDUP = strdup(CL);
-      __CLDUP[3] = '4';
-      return __CLDUP;
-   }
+   static inline const char* COLOR(const uint8_t& R, const uint8_t& G, const uint8_t& B);
+   static inline const char* TOCOLR(const char* CL);
 }
 
 /**
@@ -164,31 +153,7 @@ namespace Cursor{
     * while simultaneously replacing heavy `snprintf` calls with a raw base-10 calculation.
     * @return A C-string containing the constructed escape sequence.
     */
-   static inline const char* FORMAT_CURSOR(char dir, const uint16_t N) {
-      static char bufs[4][BUF];
-      static uint8_t idx = 0;
-      char* p = bufs[idx];
-      idx = (idx + 1) & 3;
-
-      *p++ = '\033'; *p++ = '[';
-      uint16_t v = N;
-      char pad = 0, c = '0';
-      while (v >= 10000) { v -= 10000; c++; }
-      if (c > '0') { *p++ = c; pad = 1; }
-      c = '0';
-      while (v >= 1000) { v -= 1000; c++; }
-      if (c > '0' || pad) { *p++ = c; pad = 1; }
-      c = '0';
-      while (v >= 100) { v -= 100; c++; }
-      if (c > '0' || pad) { *p++ = c; pad = 1; }
-      c = '0';
-      while (v >= 10) { v -= 10; c++; }
-      if (c > '0' || pad) { *p++ = c; pad = 1; }
-      *p++ = '0' + (char)v;
-      
-      *p++ = dir; *p = '\0';
-      return bufs[(idx - 1) & 3];
-   }
+   static inline const char* FORMAT_CURSOR(char dir, const uint16_t N);
 
    /**
     * @brief Injects an ANSI code to shift the cursor left.
@@ -197,7 +162,7 @@ namespace Cursor{
     * Defers calculation directly to the optimized `FORMAT_CURSOR` circular buffer sequence.
     * @return A safe C-string payload ready for hardware serial transmission.
     */
-   static inline const char* LEFT(const uint16_t N) { return FORMAT_CURSOR('D', N); }
+   static inline const char* LEFT(const uint16_t N);
 
    /**
     * @brief Injects an ANSI code to shift the cursor right.
@@ -206,7 +171,7 @@ namespace Cursor{
     * Defers calculation directly to the optimized `FORMAT_CURSOR` circular buffer sequence.
     * @return A safe C-string payload ready for hardware serial transmission.
     */
-   static inline const char* RIGHT(const uint16_t N) { return FORMAT_CURSOR('C', N); }
+   static inline const char* RIGHT(const uint16_t N);
 
    /**
     * @brief Injects an ANSI code to shift the cursor upwards.
@@ -215,7 +180,7 @@ namespace Cursor{
     * Defers calculation directly to the optimized `FORMAT_CURSOR` circular buffer sequence.
     * @return A safe C-string payload ready for hardware serial transmission.
     */
-   static inline const char* UP(const uint16_t N) { return FORMAT_CURSOR('A', N); }
+   static inline const char* UP(const uint16_t N);
 
    /**
     * @brief Injects an ANSI code to shift the cursor downwards.
@@ -224,7 +189,7 @@ namespace Cursor{
     * Defers calculation directly to the optimized `FORMAT_CURSOR` circular buffer sequence.
     * @return A safe C-string payload ready for hardware serial transmission.
     */
-   static inline const char* DOWN(const uint16_t N) { return FORMAT_CURSOR('B', N); }
+   static inline const char* DOWN(const uint16_t N);
 
    /**
     * @brief Snaps the cursor to an absolute target coordinate on the terminal grid.
@@ -235,43 +200,7 @@ namespace Cursor{
     * dual-variable base-10 math operations required for absolute terminal coordinate parsing.
     * @return A safe C-string payload ready for hardware serial transmission.
     */
-   static inline const char* TOXY(const uint16_t X, const uint16_t Y){
-      static char bufs[4][BUF + 8];
-      static uint8_t idx = 0;
-      char* p = bufs[idx];
-      idx = (idx + 1) & 3;
-      *p++ = '\033'; *p++ = '[';
-      uint16_t v = Y;
-      char pad = 0, c = '0';
-      while (v >= 10000) { v -= 10000; c++; }
-      if (c > '0') { *p++ = c; pad = 1; }
-      c = '0';
-      while (v >= 1000) { v -= 1000; c++; }
-      if (c > '0' || pad) { *p++ = c; pad = 1; }
-      c = '0';
-      while (v >= 100) { v -= 100; c++; }
-      if (c > '0' || pad) { *p++ = c; pad = 1; }
-      c = '0';
-      while (v >= 10) { v -= 10; c++; }
-      if (c > '0' || pad) { *p++ = c; pad = 1; }
-      *p++ = '0' + (char)v;
-      *p++ = ';';
-      v = X; pad = 0; c = '0';
-      while (v >= 10000) { v -= 10000; c++; }
-      if (c > '0') { *p++ = c; pad = 1; }
-      c = '0';
-      while (v >= 1000) { v -= 1000; c++; }
-      if (c > '0' || pad) { *p++ = c; pad = 1; }
-      c = '0';
-      while (v >= 100) { v -= 100; c++; }
-      if (c > '0' || pad) { *p++ = c; pad = 1; }
-      c = '0';
-      while (v >= 10) { v -= 10; c++; }
-      if (c > '0' || pad) { *p++ = c; pad = 1; }
-      *p++ = '0' + (char)v;
-      *p++ = 'H'; *p = '\0';
-      return bufs[(idx - 1) & 3];
-   }
+   static inline const char* TOXY(const uint16_t X, const uint16_t Y);
 
    /**
     * @brief Parses an incoming terminal Cursor Position Report string to extract screen boundaries.
@@ -281,21 +210,7 @@ namespace Cursor{
     * the char pointer memory to rapidly calculate the window size in extreme low-latency environments.
     * @return A pair of uint16_t variables representing terminal Width and Height.
     */
-   static inline std::pair<uint16_t, uint16_t> PARSERSIZE(const char* str){
-      uint16_t x = 0;
-      uint16_t y = 0;
-      const char* i = str + 2;
-      for (; *i != 59; i++){
-         x *= 10;
-         x += *i - 48;
-      }
-      if (*i == 59) i++;
-      for (; *i != 82; i++){
-         y *= 10;
-         y += *i - 48;
-      }
-      return std::make_pair(y ,x);
-   }
+   static inline std::pair<uint16_t, uint16_t> PARSERSIZE(const char* str);
 }
 
 /**
@@ -309,6 +224,123 @@ namespace Clear{
    inline constexpr const char* EOL = "\033[0K"; /**< Sweeps text from the cursor to the far right end of the current line. */
    inline constexpr const char* SOL = "\033[1K"; /**< Sweeps text from the cursor to the far left start of the current line. */
    inline constexpr const char* LNE = "\033[2K"; /**< Completely obliterates the entire current line regardless of cursor placement. */
+}
+
+/* IMPLEMENTATIONS - NOTHING HERE */
+
+inline const char* Color::COLOR(const uint8_t& R, const uint8_t& G, const uint8_t& B){
+   return  "\033[038;002;" + ('0' + R / 100) + ('0' + (R / 10) % 10) + ('0' + R % 10) + ';' + ('0' + G / 100) + ('0' + (G / 10) % 10) + ('0' + G % 10) + ';' + ('0' + B / 100) + ('0' + (B / 10) % 10) + ('0' + B % 10) + 'm';
+}
+
+inline const char* Color::TOCOLR(const char* BG){
+   char* __BGDUP = strdup(BG);
+   __BGDUP[3] = '3';
+   return __BGDUP;
+}
+
+inline const char* BgColor::COLOR(const uint8_t& R, const uint8_t& G, const uint8_t& B){
+   return  "\033[048;002;" + ('0' + R / 100) + ('0' + (R / 10) % 10) + ('0' + R % 10) + ';' + ('0' + G / 100) + ('0' + (G / 10) % 10) + ('0' + G % 10) + ';' + ('0' + B / 100) + ('0' + (B / 10) % 10) + ('0' + B % 10) + 'm';
+}
+
+inline const char* BgColor::TOCOLR(const char* CL){
+   char* __CLDUP = strdup(CL);
+   __CLDUP[3] = '4';
+   return __CLDUP;
+}
+
+inline const char* Cursor::FORMAT_CURSOR(char dir, const uint16_t N) {
+   static char bufs[4][BUF];
+   static uint8_t idx = 0;
+   char* p = bufs[idx];
+   idx = (idx + 1) & 3;
+   *p++ = '\033'; *p++ = '[';
+   uint16_t v = N;
+   char pad = 0, c = '0';
+   while (v >= 10000) { v -= 10000; c++; }
+   if (c > '0') { *p++ = c; pad = 1; }
+   c = '0';
+   while (v >= 1000) { v -= 1000; c++; }
+   if (c > '0' || pad) { *p++ = c; pad = 1; }
+   c = '0';
+   while (v >= 100) { v -= 100; c++; }
+   if (c > '0' || pad) { *p++ = c; pad = 1; }
+   c = '0';
+   while (v >= 10) { v -= 10; c++; }
+   if (c > '0' || pad) { *p++ = c; pad = 1; }
+   *p++ = '0' + (char)v;
+   
+   *p++ = dir; *p = '\0';
+   return bufs[(idx - 1) & 3];
+}
+
+inline const char* Cursor::LEFT(const uint16_t N) { 
+   return FORMAT_CURSOR('D', N); 
+}
+
+inline const char* Cursor::RIGHT(const uint16_t N) {
+   return FORMAT_CURSOR('C', N);
+}
+
+inline const char* Cursor::UP(const uint16_t N) {
+   return FORMAT_CURSOR('A', N);
+}
+
+inline const char* Cursor::DOWN(const uint16_t N) {
+   return FORMAT_CURSOR('B', N);
+}
+
+inline const char* Cursor::TOXY(const uint16_t X, const uint16_t Y){
+   static char bufs[4][BUF + 8];
+   static uint8_t idx = 0;
+   char* p = bufs[idx];
+   idx = (idx + 1) & 3;
+   *p++ = '\033'; *p++ = '[';
+   uint16_t v = Y;
+   char pad = 0, c = '0';
+   while (v >= 10000) { v -= 10000; c++; }
+   if (c > '0') { *p++ = c; pad = 1; }
+   c = '0';
+   while (v >= 1000) { v -= 1000; c++; }
+   if (c > '0' || pad) { *p++ = c; pad = 1; }
+   c = '0';
+   while (v >= 100) { v -= 100; c++; }
+   if (c > '0' || pad) { *p++ = c; pad = 1; }
+   c = '0';
+   while (v >= 10) { v -= 10; c++; }
+   if (c > '0' || pad) { *p++ = c; pad = 1; }
+   *p++ = '0' + (char)v;
+   *p++ = ';';
+   v = X; pad = 0; c = '0';
+   while (v >= 10000) { v -= 10000; c++; }
+   if (c > '0') { *p++ = c; pad = 1; }
+   c = '0';
+   while (v >= 1000) { v -= 1000; c++; }
+   if (c > '0' || pad) { *p++ = c; pad = 1; }
+   c = '0';
+   while (v >= 100) { v -= 100; c++; }
+   if (c > '0' || pad) { *p++ = c; pad = 1; }
+   c = '0';
+   while (v >= 10) { v -= 10; c++; }
+   if (c > '0' || pad) { *p++ = c; pad = 1; }
+   *p++ = '0' + (char)v;
+   *p++ = 'H'; *p = '\0';
+   return bufs[(idx - 1) & 3];
+}
+
+inline std::pair<uint16_t, uint16_t> Cursor::PARSERSIZE(const char* str){
+   uint16_t x = 0;
+   uint16_t y = 0;
+   const char* i = str + 2;
+   for (; *i != 59; i++){
+      x *= 10;
+      x += *i - 48;
+   }
+   if (*i == 59) i++;
+   for (; *i != 82; i++){
+      y *= 10;
+      y += *i - 48;
+   }
+   return std::make_pair(y ,x);
 }
 
 #endif
