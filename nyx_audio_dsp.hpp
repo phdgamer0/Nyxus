@@ -1326,12 +1326,12 @@ inline void Convolution::InitPartitionedConv(PartitionedConvState<N, C>& state, 
 
 template <size_t N, size_t C>
 inline void Convolution::ProcessPartitionedBlock(float* __restrict io_buffer, PartitionedConvState<N, C>& state) {
-   constexpr size_t fft_size = N * 2;      // N is PARTITION_SIZE
+   constexpr size_t fft_size = N * 2;
    constexpr size_t partition_count = C;
    std::fill(state.staging_buffer.begin(), state.staging_buffer.end(), std::complex<float>{0.0f, 0.0f});
    for (size_t i = 0; i < state.partition_size; i++) state.staging_buffer[i].real(io_buffer[i]);
    FFT::Forward(state.staging_buffer.data(), state.state, fft_size);
-   for (size_t i = 0; i < fft_size; i++) state.audio_history_fft[state.current_partition][i] = state.staging_buffer[i];
+   for (size_t i = 0; i < fft_size; i++) state.audio_history_fft[state.current_partition * fft_size + i] = state.staging_buffer[i];
    std::fill(state.accumulator_buffer.begin(), state.accumulator_buffer.end(), std::complex<float>{0.0f, 0.0f});
    for (size_t step = 0; step < partition_count; step++) {
       const size_t history_idx = (state.current_partition + partition_count - step) % partition_count;
