@@ -31,12 +31,24 @@
 *  SOFTWARE.
 */
 #pragma once
+
 #ifndef _NYXUS_TERMINAL_GRAPHICS_HPP_
 #define _NYXUS_TERMINAL_GRAPHICS_HPP_
+
 #include <cstdint>
 #include <utility>
+#include <cstdio>
 #include <string.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 
+/** @brief Hardware spinlock for thread-safe ANSI buffer generation. */
+inline portMUX_TYPE term_spinlock = portMUX_INITIALIZER_UNLOCKED;
+
+/**
+ * @namespace Color
+ * @brief ANSI escape sequences for Text color styles.
+ */
 namespace Color{
    inline constexpr const char* RESET       = "\033[000;000;000;000;000m";
    inline constexpr const char* BLACK       = "\033[038;002;000;000;000m";
@@ -70,11 +82,17 @@ namespace Color{
    inline constexpr const char* NVIMBLUE    = "\033[038;002;130;170;255m";
    inline constexpr const char* NVIMPURPLE  = "\033[038;002;192;153;255m";
    inline constexpr const char* NVIMDARK    = "\033[038;002;034;036;054m";
-   static inline const char* COLOR(const uint8_t& R, const uint8_t& G, const uint8_t& B);
-   static inline const char* TOCOLR(const char* BG);
+
+
+   [[nodiscard]] static inline const char* COLOR(const uint8_t& R, const uint8_t& G, const uint8_t& B);
+
+   [[nodiscard]] static inline const char* TOCOLR(const char* BG);
 }
 
-
+/**
+ * @namespace BgColor
+ * @brief ANSI escape sequences for Background color styles.
+ */
 namespace BgColor{
    inline constexpr const char* RESET       = "\033[000;000;000;000;000m";
    inline constexpr const char* RED         = "\033[048;002;255;000;000m";
@@ -108,8 +126,11 @@ namespace BgColor{
    inline constexpr const char* NVIMBLUE    = "\033[048;002;130;170;255m";
    inline constexpr const char* NVIMPURPLE  = "\033[048;002;192;153;255m";
    inline constexpr const char* NVIMDARK    = "\033[048;002;034;036;054m";
-   static inline const char* COLOR(const uint8_t& R, const uint8_t& G, const uint8_t& B);
-   static inline const char* TOCOLR(const char* CL);
+
+
+   [[nodiscard]] static inline const char* COLOR(const uint8_t& R, const uint8_t& G, const uint8_t& B);
+
+   [[nodiscard]] static inline const char* TOCOLR(const char* CL);
 }
 
 /**
@@ -132,17 +153,23 @@ namespace Font{
 }
 
 /**
- * @namespace Cursor
+ * @class Cursor
  * @brief ANSI escape sequences and hardware math methods for manipulating the terminal cursor.
  */
-namespace Cursor{
-   inline constexpr uint8_t BUF = 0x10; /**< Standard buffer allocation size for cursor string operations. */
-   inline constexpr const char* GETSIZE    = "\033[s\033[65354;65354H\033[6n\033[u"; /**< Triggers blind CPR to force the terminal to report its max dimensions. */
-   inline constexpr const char* SAVEPOS    = "\033[s"; /**< Saves the cursor's current X/Y coordinate in the terminal's memory. */
-   inline constexpr const char* RESTOREPOS = "\033[u"; /**< Snaps the cursor back to the last saved X/Y coordinate. */
-   inline constexpr const char* HIDE       = "\033[?25l"; /**< Temporarily vanishes the cursor block to hide redraw stutters. */
-   inline constexpr const char* SHOW       = "\033[?25h"; /**< Restores the visible cursor block. */
+class Cursor{
+   private:
+   Cursor() = delete;
+   ~Cursor() = delete;
    
+   public:
+   static inline constexpr uint8_t BUF = 0x10;                                              /**< Standard buffer allocation size for cursor string operations.          */
+   static inline constexpr const char* GETSIZE    = "\033[s\033[65354;65354H\033[6n\033[u"; /**< Triggers blind CPR to force the terminal to report its max dimensions. */
+   static inline constexpr const char* SAVEPOS    = "\033[s";                               /**< Saves the cursor's current X/Y coordinate in the terminal's memory.    */
+   static inline constexpr const char* RESTOREPOS = "\033[u";                               /**< Snaps the cursor back to the last saved X/Y coordinate.                */
+   static inline constexpr const char* HIDE       = "\033[?25l";                            /**< Temporarily vanishes the cursor block to hide redraw stutters.         */
+   static inline constexpr const char* SHOW       = "\033[?25h";                            /**< Restores the visible cursor block.                                     */
+   
+   public:
    /**
     * @brief Core ANSI constructor utilizing a thread-safe circular buffer.
     * @param dir The ANSI directional character command.
@@ -153,8 +180,9 @@ namespace Cursor{
     * while simultaneously replacing heavy `snprintf` calls with a raw base-10 calculation.
     * @return A C-string containing the constructed escape sequence.
     */
-   static inline const char* FORMAT_CURSOR(char dir, const uint16_t N);
+   [[nodiscard]] static inline const char* FORMAT_CURSOR(char dir, const uint16_t N);
 
+   public:
    /**
     * @brief Injects an ANSI code to shift the cursor left.
     * @param N Number of columns to traverse.
@@ -162,8 +190,9 @@ namespace Cursor{
     * Defers calculation directly to the optimized `FORMAT_CURSOR` circular buffer sequence.
     * @return A safe C-string payload ready for hardware serial transmission.
     */
-   static inline const char* LEFT(const uint16_t N);
+   [[nodiscard]] static inline const char* LEFT(const uint16_t N);
 
+   public:
    /**
     * @brief Injects an ANSI code to shift the cursor right.
     * @param N Number of columns to traverse.
@@ -171,8 +200,9 @@ namespace Cursor{
     * Defers calculation directly to the optimized `FORMAT_CURSOR` circular buffer sequence.
     * @return A safe C-string payload ready for hardware serial transmission.
     */
-   static inline const char* RIGHT(const uint16_t N);
+   [[nodiscard]] static inline const char* RIGHT(const uint16_t N);
 
+   public:
    /**
     * @brief Injects an ANSI code to shift the cursor upwards.
     * @param N Number of rows to traverse.
@@ -180,8 +210,9 @@ namespace Cursor{
     * Defers calculation directly to the optimized `FORMAT_CURSOR` circular buffer sequence.
     * @return A safe C-string payload ready for hardware serial transmission.
     */
-   static inline const char* UP(const uint16_t N);
+   [[nodiscard]] static inline const char* UP(const uint16_t N);
 
+   public:
    /**
     * @brief Injects an ANSI code to shift the cursor downwards.
     * @param N Number of rows to traverse.
@@ -189,8 +220,9 @@ namespace Cursor{
     * Defers calculation directly to the optimized `FORMAT_CURSOR` circular buffer sequence.
     * @return A safe C-string payload ready for hardware serial transmission.
     */
-   static inline const char* DOWN(const uint16_t N);
+   [[nodiscard]] static inline const char* DOWN(const uint16_t N);
 
+   public:
    /**
     * @brief Snaps the cursor to an absolute target coordinate on the terminal grid.
     * @param X Target column index.
@@ -200,8 +232,9 @@ namespace Cursor{
     * dual-variable base-10 math operations required for absolute terminal coordinate parsing.
     * @return A safe C-string payload ready for hardware serial transmission.
     */
-   static inline const char* TOXY(const uint16_t X, const uint16_t Y);
+   [[nodiscard]] static inline const char* TOXY(const uint16_t X, const uint16_t Y);
 
+   public:
    /**
     * @brief Parses an incoming terminal Cursor Position Report string to extract screen boundaries.
     * @param str Raw ANSI string response caught from the terminal interface.
@@ -210,8 +243,8 @@ namespace Cursor{
     * the char pointer memory to rapidly calculate the window size in extreme low-latency environments.
     * @return A pair of uint16_t variables representing terminal Width and Height.
     */
-   static inline std::pair<uint16_t, uint16_t> PARSERSIZE(const char* str);
-}
+   [[nodiscard]] static inline std::pair<uint16_t, uint16_t> PARSERSIZE(const char* str);
+};
 
 /**
  * @namespace Clear
@@ -228,119 +261,155 @@ namespace Clear{
 
 /* IMPLEMENTATIONS - NOTHING HERE */
 
-inline const char* Color::COLOR(const uint8_t& R, const uint8_t& G, const uint8_t& B){
-   return  "\033[038;002;" + ('0' + R / 100) + ('0' + (R / 10) % 10) + ('0' + R % 10) + ';' + ('0' + G / 100) + ('0' + (G / 10) % 10) + ('0' + G % 10) + ';' + ('0' + B / 100) + ('0' + (B / 10) % 10) + ('0' + B % 10) + 'm';
-}
+class TerminalMath {
+   TerminalMath() = delete;
+   ~TerminalMath() = delete;
 
-inline const char* Color::TOCOLR(const char* BG){
-   char* __BGDUP = strdup(BG);
-   __BGDUP[3] = '3';
-   return __BGDUP;
-}
+public:
+   /** @brief Fast base-10 unroller for Cursor generation. Modifies the pointer in place. */
+   static inline void append_uint16(char*& p, uint16_t v) {
+      char pad = 0, c = '0';
+      while (v >= 10000) { v -= 10000; c++; }
+      if (c > '0') { *p++ = c; pad = 1; }
+      c = '0';
+      while (v >= 1000) { v -= 1000; c++; }
+      if (c > '0' || pad) { *p++ = c; pad = 1; }
+      c = '0';
+      while (v >= 100) { v -= 100; c++; }
+      if (c > '0' || pad) { *p++ = c; pad = 1; }
+      c = '0';
+      while (v >= 10) { v -= 10; c++; }
+      if (c > '0' || pad) { *p++ = c; pad = 1; }
+      *p++ = '0' + (char)v;
+   }
 
-inline const char* BgColor::COLOR(const uint8_t& R, const uint8_t& G, const uint8_t& B){
-   return  "\033[048;002;" + ('0' + R / 100) + ('0' + (R / 10) % 10) + ('0' + R % 10) + ';' + ('0' + G / 100) + ('0' + (G / 10) % 10) + ('0' + G % 10) + ';' + ('0' + B / 100) + ('0' + (B / 10) % 10) + ('0' + B % 10) + 'm';
-}
+   /** @brief Padded fast base-10 unroller specifically for RGB (0-255). Modifies the pointer in place. */
+   static inline void append_rgb_uint8(char*& p, uint8_t v) {
+      char c = '0';
+      while (v >= 100) { v -= 100; c++; }
+      *p++ = c;
+      c = '0';
+      while (v >= 10) { v -= 10; c++; }
+      *p++ = c;
+      *p++ = '0' + v;
+   }
+};
 
-inline const char* BgColor::TOCOLR(const char* CL){
-   char* __CLDUP = strdup(CL);
-   __CLDUP[3] = '4';
-   return __CLDUP;
-}
-
-inline const char* Cursor::FORMAT_CURSOR(char dir, const uint16_t N) {
-   static char bufs[4][BUF];
+[[nodiscard]] inline const char* Color::COLOR(const uint8_t& R, const uint8_t& G, const uint8_t& B){
+   static char bufs[4][24];
    static uint8_t idx = 0;
+   portENTER_CRITICAL(&term_spinlock);
    char* p = bufs[idx];
    idx = (idx + 1) & 3;
+   portEXIT_CRITICAL(&term_spinlock);
+   const char* prefix = "\033[038;002;";
+   while (*prefix) *p++ = *prefix++;
+   TerminalMath::append_rgb_uint8(p, R); *p++ = ';';
+   TerminalMath::append_rgb_uint8(p, G); *p++ = ';';
+   TerminalMath::append_rgb_uint8(p, B); *p++ = 'm';
+   *p = '\0';
+   return bufs[(idx - 1) & 3];
+}
+
+[[nodiscard]] inline const char* Color::TOCOLR(const char* BG){
+   static char bufs[4][32];
+   static uint8_t idx = 0;
+   char* dest = bufs[idx];
+   idx = (idx + 1) & 3;
+   char* p = dest;
+   const char* src = BG;
+   while (*src) *p++ = *src++;
+   *p = '\0';
+   if (dest[3] == '4') dest[3] = '3';
+   return bufs[(idx - 1) & 3];
+}
+
+[[nodiscard]] inline const char* BgColor::COLOR(const uint8_t& R, const uint8_t& G, const uint8_t& B){
+   static char bufs[4][24];
+   static uint8_t idx = 0;
+   portENTER_CRITICAL(&term_spinlock);
+   char* p = bufs[idx];
+   idx = (idx + 1) & 3;
+   portEXIT_CRITICAL(&term_spinlock);
+   const char* prefix = "\033[048;002;";
+   while (*prefix) *p++ = *prefix++;
+   TerminalMath::append_rgb_uint8(p, R); *p++ = ';';
+   TerminalMath::append_rgb_uint8(p, G); *p++ = ';';
+   TerminalMath::append_rgb_uint8(p, B); *p++ = 'm';
+   *p = '\0';
+   return bufs[(idx - 1) & 3];
+}
+
+[[nodiscard]] inline const char* BgColor::TOCOLR(const char* CL){
+   static char bufs[4][32];
+   static uint8_t idx = 0;
+   char* dest = bufs[idx];
+   idx = (idx + 1) & 3;
+   char* p = dest;
+   const char* src = CL;
+   while (*src) *p++ = *src++;
+   *p = '\0';
+   if (dest[3] == '3') dest[3] = '4';
+   return bufs[(idx - 1) & 3];
+}
+
+[[nodiscard]] inline const char* Cursor::FORMAT_CURSOR(char dir, const uint16_t N) {
+   static char bufs[4][BUF];
+   static uint8_t idx = 0;
+   portENTER_CRITICAL(&term_spinlock);
+   char* p = bufs[idx];
+   idx = (idx + 1) & 3;
+   portEXIT_CRITICAL(&term_spinlock);
    *p++ = '\033'; *p++ = '[';
-   uint16_t v = N;
-   char pad = 0, c = '0';
-   while (v >= 10000) { v -= 10000; c++; }
-   if (c > '0') { *p++ = c; pad = 1; }
-   c = '0';
-   while (v >= 1000) { v -= 1000; c++; }
-   if (c > '0' || pad) { *p++ = c; pad = 1; }
-   c = '0';
-   while (v >= 100) { v -= 100; c++; }
-   if (c > '0' || pad) { *p++ = c; pad = 1; }
-   c = '0';
-   while (v >= 10) { v -= 10; c++; }
-   if (c > '0' || pad) { *p++ = c; pad = 1; }
-   *p++ = '0' + (char)v;
-   
+   TerminalMath::append_uint16(p, N);
    *p++ = dir; *p = '\0';
    return bufs[(idx - 1) & 3];
 }
 
-inline const char* Cursor::LEFT(const uint16_t N) { 
+[[nodiscard]] inline const char* Cursor::LEFT(const uint16_t N) { 
    return FORMAT_CURSOR('D', N); 
 }
 
-inline const char* Cursor::RIGHT(const uint16_t N) {
+[[nodiscard]] inline const char* Cursor::RIGHT(const uint16_t N) {
    return FORMAT_CURSOR('C', N);
 }
 
-inline const char* Cursor::UP(const uint16_t N) {
+[[nodiscard]] inline const char* Cursor::UP(const uint16_t N) {
    return FORMAT_CURSOR('A', N);
 }
 
-inline const char* Cursor::DOWN(const uint16_t N) {
+[[nodiscard]] inline const char* Cursor::DOWN(const uint16_t N) {
    return FORMAT_CURSOR('B', N);
 }
 
-inline const char* Cursor::TOXY(const uint16_t X, const uint16_t Y){
+[[nodiscard]] inline const char* Cursor::TOXY(const uint16_t X, const uint16_t Y){
    static char bufs[4][BUF + 8];
    static uint8_t idx = 0;
+   portENTER_CRITICAL(&term_spinlock);
    char* p = bufs[idx];
    idx = (idx + 1) & 3;
+   portEXIT_CRITICAL(&term_spinlock);
    *p++ = '\033'; *p++ = '[';
-   uint16_t v = Y;
-   char pad = 0, c = '0';
-   while (v >= 10000) { v -= 10000; c++; }
-   if (c > '0') { *p++ = c; pad = 1; }
-   c = '0';
-   while (v >= 1000) { v -= 1000; c++; }
-   if (c > '0' || pad) { *p++ = c; pad = 1; }
-   c = '0';
-   while (v >= 100) { v -= 100; c++; }
-   if (c > '0' || pad) { *p++ = c; pad = 1; }
-   c = '0';
-   while (v >= 10) { v -= 10; c++; }
-   if (c > '0' || pad) { *p++ = c; pad = 1; }
-   *p++ = '0' + (char)v;
+   TerminalMath::append_uint16(p, Y);
    *p++ = ';';
-   v = X; pad = 0; c = '0';
-   while (v >= 10000) { v -= 10000; c++; }
-   if (c > '0') { *p++ = c; pad = 1; }
-   c = '0';
-   while (v >= 1000) { v -= 1000; c++; }
-   if (c > '0' || pad) { *p++ = c; pad = 1; }
-   c = '0';
-   while (v >= 100) { v -= 100; c++; }
-   if (c > '0' || pad) { *p++ = c; pad = 1; }
-   c = '0';
-   while (v >= 10) { v -= 10; c++; }
-   if (c > '0' || pad) { *p++ = c; pad = 1; }
-   *p++ = '0' + (char)v;
+   TerminalMath::append_uint16(p, X);
    *p++ = 'H'; *p = '\0';
    return bufs[(idx - 1) & 3];
 }
 
-inline std::pair<uint16_t, uint16_t> Cursor::PARSERSIZE(const char* str){
-   uint16_t x = 0;
-   uint16_t y = 0;
+[[nodiscard]] inline std::pair<uint16_t, uint16_t> Cursor::PARSERSIZE(const char* str){
+   uint16_t x = 0, y = 0;
    const char* i = str + 2;
-   for (; *i != 59; i++){
+   for (; *i != ';' && *i != '\0'; i++){
       x *= 10;
-      x += *i - 48;
+      x += *i - '0';
    }
-   if (*i == 59) i++;
-   for (; *i != 82; i++){
+   if (*i == ';') i++;
+   for (; *i != 'R' && *i != '\0'; i++){
       y *= 10;
-      y += *i - 48;
+      y += *i - '0';
    }
-   return std::make_pair(y ,x);
+   return std::make_pair(y, x);
 }
 
 #endif
