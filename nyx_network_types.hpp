@@ -34,13 +34,24 @@
 #ifndef _NYXUS_NETWORK_TYPES_HPP_
 #define _NYXUS_NETWORK_TYPES_HPP_
 
-#include <IPAddress.h>
+#include <esp_wifi_types.h>
 #include <vector>
 #include <string>
 #include <optional>
 #include <SdFat.h>
 #include <cstdint>
+
 static inline constexpr uint8_t MAC_SIZE = 0x06;
+
+
+/**
+ * @brief Convert a 32-bit IPv4 address to a dotted-decimal C string.
+ * @param ip  IPv4 address in host byte order (32-bit integer).
+ * @param buf Buffer to receive the resulting NUL-terminated string.
+ * @param bufsz Size of the provided buffer in bytes.
+ * @return void
+ */
+static void ipToStr(uint32_t ip, char *buf, size_t bufsz);
 
 /**
 * @namespace WifiMode
@@ -60,13 +71,13 @@ namespace WifiMode{
 * @note Operates as an aggregate struct to guarantee memory safety during designated initialization.
 */
 struct ConnectionConfig{
-   long long connection_wait_time_ms;   /**< The hardware timeout threshold (in milliseconds) before abandoning a handshake attempt.  */
-   IPAddress ip1;                       /**< The spoofed or assigned static IPv4 address presented to the target network.             */
-   IPAddress gateway;                   /**< The target network's primary gateway router address for outbound traffic.                */
-   IPAddress subnet;                    /**< The subnet mask payload to define the local network boundaries.                          */
-   IPAddress dns1;                      /**< Primary Domain Name System server address override.                                      */
-   IPAddress dns2;                      /**< Secondary Domain Name System server fallback address.                                    */
-   uint8_t retry_amount;                /**< Maximum number of sequential authentication attempts before declaring target exhaustion. */
+   uint32_t connection_wait_time_ms;  /**< The hardware timeout threshold (in milliseconds) before abandoning a handshake attempt.  */
+   uint32_t ip1;                      /**< The spoofed or assigned static IPv4 address presented to the target network.             */
+   uint32_t gateway;                  /**< The target network's primary gateway router address for outbound traffic.                */
+   uint32_t subnet;                   /**< The subnet mask payload to define the local network boundaries.                          */
+   uint32_t dns1;                     /**< Primary Domain Name System server address override.                                      */
+   uint32_t dns2;                     /**< Secondary Domain Name System server fallback address.                                    */
+   uint8_t retry_amount;              /**< Maximum number of sequential authentication attempts before declaring target exhaustion. */
 };
 
 /**
@@ -173,6 +184,13 @@ namespace PCAP {
 * @brief Raw data-link layer structures for Man-in-the-Middle network manipulation.
 */
 namespace MITM {
+
+   /** @brief Compile-time Big-Endian converters to guarantee zero CPU overhead during packet injection. */
+   constexpr uint16_t Htons(uint16_t x);
+
+   /** @brief Compile-time Big-Endian converters to guarantee zero CPU overhead during packet injection. */
+   constexpr uint32_t Htonl(uint32_t x);
+
    /**
    * @struct ethernet_header
    * @brief Standard IEEE 802.3 Ethernet frame header for Layer 2 injection.
@@ -180,7 +198,7 @@ namespace MITM {
    struct __attribute__((packed)) ethernet_header {
       uint8_t  dest_mac[MAC_SIZE];
       uint8_t  src_mac[MAC_SIZE];
-      uint16_t ethertype; // 0x0806 for ARP, 0x0800 for IPv4
+      uint16_t ethertype;        // ASSIGN USING: Htons(0x0806) for ARP, Htons(0x0800) for IPv4
    };
 
    /**
@@ -188,15 +206,15 @@ namespace MITM {
    * @brief Address Resolution Protocol payload for cache poisoning and network routing manipulation.
    */
    struct __attribute__((packed)) arp_header {
-      uint16_t hardware_type;        /**< 0x0001 for Ethernet                    */  
-      uint16_t protocol_type;        /**< 0x0800 for IPv4                        */
-      uint8_t  hardware_size;        /**< 6 (MAC length)                         */  
-      uint8_t  protocol_size;        /**< 4 (IPv4 length)                        */  
-      uint16_t opcode;               /**< 1 for Request, 2 for Reply (Spoof)     */  
-      uint8_t  sender_mac[MAC_SIZE]; /**< The MAC address we want them to trust  */   
-      uint32_t sender_ip;            /**< The IP address we are pretending to be */
-      uint8_t  target_mac[MAC_SIZE]; /**< The victim's MAC                       */   
-      uint32_t target_ip;            /**< The victim's IP                        */    
+      uint16_t hardware_type;        /**< ASSIGN USING: Htons(0x0001)                        */  
+      uint16_t protocol_type;        /**< ASSIGN USING: Htons(0x0800) for IPv4               */
+      uint8_t  hardware_size;        /**< 6 (MAC length)                                     */  
+      uint8_t  protocol_size;        /**< 4 (IPv4 length)                                    */  
+      uint16_t opcode;               /**< ASSIGN USING: Htons(1) for Req, Htons(2) for Reply */  
+      uint8_t  sender_mac[MAC_SIZE]; /**< The MAC address we want them to trust              */   
+      uint32_t sender_ip;            /**< ASSIGN USING: Htonl(ip)                            */
+      uint8_t  target_mac[MAC_SIZE]; /**< The victim's MAC                                   */   
+      uint32_t target_ip;            /**< ASSIGN USING: Htonl(ip)                            */
    };
 
    /**
@@ -205,12 +223,12 @@ namespace MITM {
     * @note Packed to ensure strict RFC 1035 alignment.
     */
    struct __attribute__((packed)) dns_header {
-      uint16_t id;         /**< Transaction ID to match request with response. */
-      uint16_t flags;      /**< Bitmask for Query/Response flags and Error codes. */
-      uint16_t qdcount;    /**< Number of questions. */
-      uint16_t ancount;    /**< Number of answer resource records. */
-      uint16_t nscount;    /**< Number of authority resource records. */
-      uint16_t arcount;    /**< Number of additional resource records. */
+      uint16_t id;         /**< Transaction ID to match request with response. ASSIGN USING: Htons(id)       */
+      uint16_t flags;      /**< Bitmask for Query/Response flags and Error codes. ASSIGN USING: Htons(flags) */
+      uint16_t qdcount;    /**< Number of questions. ASSIGN USING: Htons(qdcount)                            */
+      uint16_t ancount;    /**< Number of answer resource records. ASSIGN USING: Htons(ancount)              */
+      uint16_t nscount;    /**< Number of authority resource records. ASSIGN USING: Htons(nscount)           */
+      uint16_t arcount;    /**< Number of additional resource records. ASSIGN USING: Htons(arcount)          */
    };
 
    /**
@@ -223,12 +241,12 @@ namespace MITM {
     * manually parsing or rewriting the requested domain string.
     */
    struct __attribute__((packed)) dns_answer_trailer {
-      uint16_t name_ptr;  /**< Byte offset pointer (0xC00C) pointing back to the queried name. */
-      uint16_t type;      /**< 0x0001 (A record / IPv4).                                       */
-      uint16_t cls;       /**< 0x0001 (IN / Internet Class).                                   */
-      uint32_t ttl;       /**< Time-to-Live (Seconds) before cache expires.                    */
-      uint16_t data_len;  /**< Length of the IP address (0x0004 for IPv4).                     */
-      uint32_t ip_addr;   /**< The malicious IP address we are injecting.                      */
+      uint16_t name_ptr;  /**< Byte offset pointer (0xC00C) pointing back to the queried name. ASSIGN USING: Htons(0xC00C) */
+      uint16_t type;      /**< 0x0001 (A record / IPv4). ASSIGN USING: Htons(1)                                            */
+      uint16_t cls;       /**< 0x0001 (IN / Internet Class). ASSIGN USING: Htons(1)                                        */
+      uint32_t ttl;       /**< Time-to-Live (Seconds) before cache expires. ASSIGN USING: Htons(seconds)                   */
+      uint16_t data_len;  /**< Length of the IP address (0x0004 for IPv4). ASSIGN USING: Htons(4)                          */
+      uint32_t ip_addr;   /**< The malicious IP address we are injecting. ASSIGN USING: Htons(malicious_ip)                */
    };
 }
 
@@ -289,6 +307,19 @@ namespace Extension{
    * * @attention - IP parsing natively supports standard IPv4 strings (e.g., "192.168.1.1").
    */
    inline constexpr const char* connconf = ".connconf";
+}
+
+void ipToStr (uint32_t ip, char *buf, size_t bufsz){
+   if (bufsz < 16) { if (bufsz>0) buf[0]='\0'; return; }
+   snprintf(buf, bufsz, "%u.%u.%u.%u", (ip >> 24) & 0xFF, (ip >> 16) & 0xFF, (ip >> 8) & 0xFF, ip & 0xFF);
+}
+
+constexpr uint16_t MITM::Htons(uint16_t x) { 
+   return ((x & 0x00FF) << 8) | ((x & 0xFF00) >> 8);
+}
+
+constexpr uint32_t MITM::Htonl(uint32_t x) {
+   return ((x & 0x000000FF) << 24) | ((x & 0x0000FF00) << 8) | ((x & 0x00FF0000) >> 8) | ((x & 0xFF000000) >> 24);
 }
 
 #endif
