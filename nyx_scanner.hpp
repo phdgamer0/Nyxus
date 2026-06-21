@@ -36,6 +36,8 @@
 #include <string.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include <freertos/queue.h>
+#include <esp_heap_caps.h>
 #include <esp_wifi.h>
 #include <esp_timer.h>
 #include <esp_event.h>
@@ -47,9 +49,8 @@
 #include <Nyxus/nyx_terminal_graphics.hpp>
 #include <algorithm>
 #include <RTClib.h>
+#include <SdFat.h>
 
-extern SdFat sd;
-extern RTC_DS3231 rtc;
 inline constexpr uint32_t init_delay_time = 100;
 /**
 * @brief Ping-Pong Buffer Size (8 Kilobytes per buffer).
@@ -80,23 +81,34 @@ class NYXUS_SCANNER{
    FsFile sniffer_file;
 
    private:
-   /**
-   * @brief Primary SRAM Capture Buffer
+   /** 
+   * @brief Primary SRAM Capture Buffer (Dynamically Allocated)
    */
-   uint8_t sniffer_buffer_A[SNIFFER_BUFFER_SIZE];
+   uint8_t* sniffer_buffer_A = nullptr;
 
    private:
-   /**
-   * @brief Secondary SRAM Capture Buffer
+   /** 
+   * @brief Secondary SRAM Capture Buffer (Dynamically Allocated)
    */
-   uint8_t sniffer_buffer_B[SNIFFER_BUFFER_SIZE];
+   uint8_t* sniffer_buffer_B = nullptr;
 
+   protected:
+   /** 
+   * @brief Function pointer to keep the UI responsive during blocking scans.
+   */
+   void  (*ui_yield_callback)() = nullptr;
 
    protected:
    /**
    * @brief Pointer to the SD card.
    */
    SdFat* sd = nullptr;
+
+   protected:
+   /**
+   * @brief Pointer to the Real Time Clock.
+   */
+   RTC_DS3231* rtc = nullptr;
 
    private:
    /**
@@ -198,14 +210,14 @@ class NYXUS_SCANNER{
    * @param nbytes Length of the buffer in bytes.
    * @return The 16-bit One's Complement checksum.
    */
-   uint16_t calculate_checksum(uint16_t *ptr, int nbytes);
+   [[nodiscard]] inline uint16_t calculate_checksum(uint16_t *ptr, int nbytes);
 
    private:
    /**
    * @brief Fetches the active IPv4 address assigned to the ESP32 Station interface.
    * @return The 32-bit integer representation of the local IP.
    */
-   uint32_t get_local_ipv4();
+   [[nodiscard]] inline uint32_t get_local_ipv4();
 
 
    private:
@@ -225,7 +237,7 @@ class NYXUS_SCANNER{
    * @param timestamp Enables timestamping on files.
    * @param scanConfig Optional configuration payload for timing/IP limits. Uses default safety parameters if omitted.
    */
-   NYXUS_SCANNER(bool toggleVerbosity = true, bool timestamp = true, SdFat* disk = nullptr, const ScanningConfig &scanConfig = {.savePath = std::nullopt, .ports = {}, .timeout = 1000,  .sd = nullptr, .mode = ScanMode::NONE, .speed = ScanSpeed::MEDIUM, .retry = 0, .verbose = false, .timestampEnabled = false}): timestampEnabled(timestamp), verbose(toggleVerbosity), scanConfig(scanConfig), sd(disk) {
+   NYXUS_SCANNER(bool toggleVerbosity = true, bool timestamp = true, SdFat* disk = nullptr, RTC_DS3231* rtc = nullptr, const ScanningConfig &scanConfig = {.savePath = std::nullopt, .ports = {}, .timeout = 1000,  .sd = nullptr, .mode = ScanMode::NONE, .speed = ScanSpeed::MEDIUM, .retry = 0, .verbose = false, .timestampEnabled = false}): timestampEnabled(timestamp), verbose(toggleVerbosity), scanConfig(scanConfig), sd(disk), rtc(rtc) {
 
    };
 
@@ -235,7 +247,7 @@ class NYXUS_SCANNER{
     * @attention This method gracefully piggybacks on the existing `NYXUS_WIFI` connection. It will NOT kill your active Wi-Fi session.
     * @return void
     */
-   void KickStart();
+   inline void  KickStart();
    
    private:
    /**
@@ -250,7 +262,7 @@ class NYXUS_SCANNER{
     * directly to the hardware timer (`255 - speed`), ensuring zero-latency floods at 0xFF.
     * @return void
     */
-   void ExecuteSweep(const std::string& target_ip, bool save_result, const std::string& save_path);
+   inline void  ExecuteSweep(const std::string& target_ip, bool save_result, const std::string& save_path);
 
    public:
    /**
@@ -260,7 +272,7 @@ class NYXUS_SCANNER{
     * @param save_path The absolute path for the results file (used if save_result is true).
     * @return void
     */
-   void Scan(const std::string& target_ip, bool save_result = false, const std::string& save_path = "");
+   inline void  Scan(const std::string& target_ip, bool save_result = false, const std::string& save_path = "");
 
    public:
    /**
@@ -271,7 +283,7 @@ class NYXUS_SCANNER{
     * @param save_path The absolute path for the results file.
     * @return void
     */
-   void Scan(const std::string& target_ip, const ScanningConfig& conf, bool save_result = false, const std::string& save_path = "");
+   inline void  Scan(const std::string& target_ip, const ScanningConfig& conf, bool save_result = false, const std::string& save_path = "");
 
    public:
    /**
@@ -282,7 +294,7 @@ class NYXUS_SCANNER{
     * @param save_path The absolute path for the results file.
     * @return void
     */
-   void Scan(const std::string& target_ip, const std::string& path, bool save_result = false, const std::string& save_path = "");
+   inline void  Scan(const std::string& target_ip, const std::string& path, bool save_result = false, const std::string& save_path = "");
 
    private:
    /**
@@ -319,14 +331,14 @@ class NYXUS_SCANNER{
     * @param save_path The absolute path to save the `.pcap` file.
     * @return void
     */
-   void StartSniffing(const std::string& save_path);
+   inline void  StartSniffing(const std::string& save_path);
 
    public:
    /**
     * @brief Safely terminates the Promiscuous Mode vacuum and finalizes the PCAP file.
     * @return void
     */
-   void StopSniffing();
+   inline void  StopSniffing();
 
    public:
    /**
@@ -338,7 +350,7 @@ class NYXUS_SCANNER{
     * or lock onto a specific router's channel to capture WPA2/WPA3 4-way EAPOL handshakes.
     * @return void
     */
-   void SetChannel(uint8_t channel);
+   inline void  SetChannel(uint8_t channel);
    
    public:
    /**
@@ -347,7 +359,7 @@ class NYXUS_SCANNER{
    * @return void
    * @attention The file extension MUST be `.scnconf`.
    */
-   void LoadScanConfig(const std::string& path);
+   inline void  LoadScanConfig(const std::string& path);
    
    public:
    /**
@@ -355,14 +367,14 @@ class NYXUS_SCANNER{
    * @param path The absolute path and filename (excluding extension) to save to.
    * @return void
    */
-   void SaveScanConfig(const std::string& path);
+   inline void  SaveScanConfig(const std::string& path);
 
    public:
    /**
    * @brief Purges the active Nmap-style scanning parameters and restores default reconnaissance settings.
    * @return void
    */
-   void ResetScanConfig();
+   inline void  ResetScanConfig();
    
    public:
    /**
@@ -370,7 +382,7 @@ class NYXUS_SCANNER{
    * @param conf The new ScanningConfig struct to inject.
    * @return void
    */
-   void ChangeScanConfig(const ScanningConfig &conf);
+   inline void  ChangeScanConfig(const ScanningConfig &conf);
 
    public:
    /**
@@ -378,7 +390,7 @@ class NYXUS_SCANNER{
    * @param path The absolute path to the `.scnconf` file (excluding extension).
    * @return void
    */
-   void Delete_ScanConfig(const std::string &path);
+   inline void  Delete_ScanConfig(const std::string &path);
    
    private:
    /**
@@ -386,30 +398,41 @@ class NYXUS_SCANNER{
    * @param filepath The absolute path of the file.
    * @return void
    */
-   void DestroyFile(const std::string& filepath);
+   inline void  DestroyFile(const std::string& filepath);
+
+   public:
+   /** 
+   * @brief Registers the UI rendering function to be called during wait states.
+   * @param callback_func pointer to the callback_func
+   */
+   inline void setYieldCallback(void (*callback_func)());
 
 };
 
 /* IMPLEMENTATIONS - NOTHING HERE */
 
-uint16_t NYXUS_SCANNER::calculate_checksum(uint16_t *ptr, int nbytes) {
-   long sum = 0;
-   uint16_t oddbyte;
-   while (nbytes > 1) {
+[[nodiscard]] inline uint16_t NYXUS_SCANNER::calculate_checksum(uint16_t *ptr, int nbytes) {
+   uint64_t sum = 0;
+   uint32_t *ptr32 = (uint32_t*)ptr;
+   while (nbytes >= 4) {
+      sum += *ptr32++;
+      nbytes -= 4;
+   }
+   ptr = (uint16_t*)ptr32;
+   while (nbytes >= 2) {
       sum += *ptr++;
       nbytes -= 2;
    }
    if (nbytes == 1) {
-      oddbyte = 0;
+      uint16_t oddbyte = 0;
       *((uint8_t*)&oddbyte) = *(uint8_t*)ptr;
       sum += oddbyte;
    }
-   sum = (sum >> 16) + (sum & 0xffff);
-   sum += (sum >> 16);
+   while (sum >> 16) sum = (sum & 0xFFFF) + (sum >> 16);
    return static_cast<uint16_t>(~sum);
 }
 
-uint32_t NYXUS_SCANNER::get_local_ipv4() {
+[[nodiscard]] inline uint32_t NYXUS_SCANNER::get_local_ipv4() {
    esp_netif_t* netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
    if (!netif) return 0;
    esp_netif_ip_info_t ip_info;
@@ -417,7 +440,7 @@ uint32_t NYXUS_SCANNER::get_local_ipv4() {
    return ip_info.ip.addr;
 }
 
-void NYXUS_SCANNER::KickStart() {
+inline void NYXUS_SCANNER::KickStart() {
    if (verbose) {
       Serial.println("===============================");
       timestamp(); Serial.printf("[%sSCANNER%s] Verifying hardware state for raw socket injection...\n", Color::YELLOW, Color::RESET);
@@ -455,7 +478,7 @@ void NYXUS_SCANNER::KickStart() {
    }
 }
 
-void NYXUS_SCANNER::ExecuteSweep(const std::string& target_ip, bool save_result, const std::string& save_path) {
+inline void NYXUS_SCANNER::ExecuteSweep(const std::string& target_ip, bool save_result, const std::string& save_path) {
    bool scan_all = (std::find(scanConfig.ports.begin(), scanConfig.ports.end(), 0) != scanConfig.ports.end());
    if (scanConfig.ports.empty() && !scan_all) {
       if (verbose) { timestamp(); Serial.printf("[%sERROR%s] No ports defined in configuration.\n", Color::RED, Color::RESET); }
@@ -479,41 +502,38 @@ void NYXUS_SCANNER::ExecuteSweep(const std::string& target_ip, bool save_result,
       return;
    }
    uint32_t hardware_delay_ms = 255 - scanConfig.speed; 
+   uint32_t total_ports = scan_all ? 65535 : scanConfig.ports.size();
    if (verbose) {
-      timestamp(); Serial.printf("[%sSCANNER%s] Initiating raw hardware sweep against %s%s%s. Inter-packet Latency: %dms\n", Color::MAGENTA, Color::RESET, Color::YELLOW, target_ip.c_str(), Color::RESET, hardware_delay_ms);
+      timestamp(); Serial.printf("[%sSCANNER%s] Initiating concurrent asynchronous sweep against %s%s%s...\n", Color::MAGENTA, Color::RESET, Color::YELLOW, target_ip.c_str(), Color::RESET);
    }
-   FsFile logFile;
-   if (save_result && save_path != "" && sd) {
-      logFile = sd->open(save_path.c_str(), O_WRITE | O_CREAT | O_AT_END);
-      if (logFile) logFile.printf("\n--- TARGET: %s ---\n", target_ip.c_str());
-   }
-   uint32_t total_ports = scan_all ? INT16_MAX : scanConfig.ports.size();
+   struct PortState {
+      uint16_t port;
+      std::string forensic_result;
+      bool responded;
+   };
+   std::vector<PortState> target_states;
+   target_states.reserve(total_ports);
    for (uint32_t i = 0; i < total_ports; i++) {
       uint16_t port = scan_all ? static_cast<uint16_t>(i + 1) : scanConfig.ports[i];
-      if (port == 0) continue;
-      bool target_responsive = false;
-      std::string forensic_result = "NO RESPONSE";
+      if (port != 0) target_states.push_back({port, "NO RESPONSE", false});
+   }
+   uint16_t dynamic_src_port = (uint16_t)random(10000, 60000);
+   for (auto& target : target_states) {
       for (uint8_t attempt = 0; attempt <= scanConfig.retry; attempt++) {
-         uint16_t dynamic_src_port = (uint16_t)random(10000, 60000); // Randomize origin to evade IDS filters
          if (use_tcp && tcp_sock >= 0) {
             uint8_t datagram[sizeof(pseudo_header) + sizeof(tcp_header)] = {0};
             pseudo_header* psh = (pseudo_header*) datagram;
             tcp_header* tcph = (tcp_header*) (datagram + sizeof(pseudo_header));
             tcph->source_port = htons(dynamic_src_port);
-            tcph->dest_port   = htons(port);
+            tcph->dest_port   = htons(target.port);
             tcph->sequence    = htonl(random(1000, 999999));
-            tcph->acknowledge = 0;
-            tcph->data_offset = (5 << 4); // 20-byte standard header
+            tcph->data_offset = (5 << 4);
             tcph->window      = htons(1024);
-            tcph->urgent_ptr  = 0;
-            tcph->checksum    = 0;
-            tcph->flags = 0;
-            if (scanConfig.mode & ScanMode::SYN)     tcph->flags |= 0x02; // TCP SYN
-            if (scanConfig.mode & ScanMode::SYN_ACK) tcph->flags |= 0x12; // TCP SYN-ACK
-            if (scanConfig.mode & ScanMode::TCP_OUT) tcph->flags |= 0x10; // TCP ACK
+            if (scanConfig.mode & ScanMode::SYN)     tcph->flags |= 0x02;
+            if (scanConfig.mode & ScanMode::SYN_ACK) tcph->flags |= 0x12;
+            if (scanConfig.mode & ScanMode::TCP_OUT) tcph->flags |= 0x10;
             psh->source_address = src_ip;
             psh->dest_address   = dest_addr.sin_addr.s_addr;
-            psh->placeholder    = 0;
             psh->protocol       = IPPROTO_TCP;
             psh->tcp_length     = htons(sizeof(tcp_header));
             tcph->checksum = calculate_checksum((uint16_t*)datagram, sizeof(pseudo_header) + sizeof(tcp_header));
@@ -523,82 +543,93 @@ void NYXUS_SCANNER::ExecuteSweep(const std::string& target_ip, bool save_result,
             uint8_t datagram[sizeof(udp_header)] = {0};
             udp_header* udph = (udp_header*) datagram;
             udph->source_port = htons(dynamic_src_port);
-            udph->dest_port   = htons(port);
+            udph->dest_port   = htons(target.port);
             udph->length      = htons(sizeof(udp_header));
-            udph->checksum    = 0;
             sendto(udp_sock, udph, sizeof(udp_header), 0, (struct sockaddr*)&dest_addr, sizeof(dest_addr));
          }
-         unsigned long start_time = millis();
-         char recv_buf[128];
-         struct sockaddr_in source_addr;
-         socklen_t socklen = sizeof(source_addr);
-         while (millis() - start_time < scanConfig.timeout) {
-            if (use_tcp && tcp_sock >= 0) {
-               int len = recvfrom(tcp_sock, recv_buf, sizeof(recv_buf), MSG_DONTWAIT, (struct sockaddr*)&source_addr, &socklen);
-               if (len > 0) {
-                  uint8_t ip_ihl = (recv_buf[0] & 0x0F) * 4;
-                  tcp_header* recv_tcph = (tcp_header*)(recv_buf + ip_ihl);
-                  if (source_addr.sin_addr.s_addr == dest_addr.sin_addr.s_addr && ntohs(recv_tcph->dest_port) == dynamic_src_port) {
-                     target_responsive = true;
-                     if ((recv_tcph->flags & 0x12) == 0x12) { 
-                        forensic_result = "OPEN (SYN-ACK)";
-                     } else if ((recv_tcph->flags & 0x14) == 0x14) {
-                        forensic_result = "CLOSED (RST)";
-                     } else {
-                        forensic_result = "FILTERED/ANOMALY";
-                     }
-                     break; 
-                  }
-               }
-            }
-            if (use_udp && udp_sock >= 0) {
-               int len = recvfrom(udp_sock, recv_buf, sizeof(recv_buf), MSG_DONTWAIT, (struct sockaddr*)&source_addr, &socklen);
-               if (len > 0 && source_addr.sin_addr.s_addr == dest_addr.sin_addr.s_addr) {
-                  target_responsive = true;
-                  forensic_result = "OPEN (UDP BOUNCE)";
-                  break;
-               }
-            }
-            vTaskDelay(pdMS_TO_TICKS(1));
-         }
-         if (target_responsive) break;
       }
-      if (verbose) {
-         const char* color = (forensic_result.find("OPEN") != std::string::npos) ? Color::GREEN : Color::RED;
-         timestamp(); Serial.printf("[%s%s%s] Port %d\n", color, forensic_result.c_str(), Color::RESET, port);
-      }
-      if (logFile) {
-         logFile.printf("Port %d: %s\n", port, forensic_result.c_str());
-      }
+      if (ui_yield_callback) ui_yield_callback();
       if (hardware_delay_ms > 0) vTaskDelay(pdMS_TO_TICKS(hardware_delay_ms)); 
+   }
+   unsigned long start_time = millis();
+   char recv_buf[128];
+   struct sockaddr_in source_addr;
+   socklen_t socklen = sizeof(source_addr);
+   while (millis() - start_time < scanConfig.timeout) {
+      if (use_tcp && tcp_sock >= 0) {
+         int len = recvfrom(tcp_sock, recv_buf, sizeof(recv_buf), MSG_DONTWAIT, (struct sockaddr*)&source_addr, &socklen);
+         if (len > 0) {
+            uint8_t ip_ihl = (recv_buf[0] & 0x0F) * 4;
+            tcp_header* recv_tcph = (tcp_header*)(recv_buf + ip_ihl);
+            uint16_t reply_port = ntohs(recv_tcph->source_port);
+            if (source_addr.sin_addr.s_addr == dest_addr.sin_addr.s_addr && ntohs(recv_tcph->dest_port) == dynamic_src_port) {
+               auto it = std::find_if(target_states.begin(), target_states.end(), [reply_port](const PortState& s) { return s.port == reply_port; });
+               if (it != target_states.end() && !it->responded) {
+                  it->responded = true;
+                  if ((recv_tcph->flags & 0x12) == 0x12) it->forensic_result = "OPEN (SYN-ACK)";
+                  else if ((recv_tcph->flags & 0x14) == 0x14) it->forensic_result = "CLOSED (RST)";
+                  else it->forensic_result = "FILTERED/ANOMALY";
+               }
+            }
+         }
+      }
+      if (use_udp && udp_sock >= 0) {
+         int len = recvfrom(udp_sock, recv_buf, sizeof(recv_buf), MSG_DONTWAIT, (struct sockaddr*)&source_addr, &socklen);
+         if (len > 0 && source_addr.sin_addr.s_addr == dest_addr.sin_addr.s_addr) {
+            uint8_t ip_ihl = (recv_buf[0] & 0x0F) * 4;
+            udp_header* recv_udph = (udp_header*)(recv_buf + ip_ihl);
+            uint16_t reply_port = ntohs(recv_udph->source_port);
+            auto it = std::find_if(target_states.begin(), target_states.end(), [reply_port](const PortState& s) { return s.port == reply_port; });
+            if (it != target_states.end() && !it->responded) {
+               it->responded = true;
+               it->forensic_result = "OPEN (UDP BOUNCE)";
+            }
+         }
+      }
+      if (ui_yield_callback) ui_yield_callback();
+      vTaskDelay(pdMS_TO_TICKS(5));
+   }
+   FsFile logFile;
+   if (save_result && save_path != "" && sd) {
+      logFile = sd->open(save_path.c_str(), O_WRITE | O_CREAT | O_AT_END);
+      if (logFile) logFile.printf("\n--- TARGET: %s ---\n", target_ip.c_str());
+   }
+   for (const auto& target : target_states) {
+      if (verbose && (target.responded || !scan_all)) {
+         const char* color = (target.forensic_result.find("OPEN") != std::string::npos) ? Color::GREEN : Color::RED;
+         timestamp(); Serial.printf("[%s%s%s] Port %d\n", color, target.forensic_result.c_str(), Color::RESET, target.port);
+      }
+      if (logFile && (target.responded || !scan_all)) logFile.printf("Port %d: %s\n", target.port, target.forensic_result.c_str());
    }
    if (logFile) logFile.close();
    if (tcp_sock >= 0) close(tcp_sock); 
    if (udp_sock >= 0) close(udp_sock); 
-   if (verbose) Serial.println("===============================");
+   if (verbose) {
+      timestamp(); Serial.println("===============================");
+   }
 }
 
-void NYXUS_SCANNER::Scan(const std::string& target_ip, bool save_result = false, const std::string& save_path = ""){
+inline void NYXUS_SCANNER::Scan(const std::string& target_ip, bool save_result, const std::string& save_path){
    ExecuteSweep(target_ip, save_result, save_path);
 }
 
-void NYXUS_SCANNER::Scan(const std::string& target_ip, const ScanningConfig& conf, bool save_result = false, const std::string& save_path = ""){
+inline void NYXUS_SCANNER::Scan(const std::string& target_ip, const ScanningConfig& conf, bool save_result, const std::string& save_path){
    ChangeScanConfig(conf);
    ExecuteSweep(target_ip, save_result, save_path);
 }
 
-void NYXUS_SCANNER::Scan(const std::string& target_ip, const std::string& path, bool save_result = false, const std::string& save_path = ""){
+inline void NYXUS_SCANNER::Scan(const std::string& target_ip, const std::string& path, bool save_result, const std::string& save_path){
    LoadScanConfig(path);
    ExecuteSweep(target_ip, save_result, save_path);
 }
 
 inline void NYXUS_SCANNER::timestamp(){
    if (!timestampEnabled) return;
-   DateTime now = rtc.now();
+   DateTime now = rtc->now();
    Serial.printf("[%s%d-%d-%d %d:%d:%d%s] ", Color::CYAN, now.year(), now.month(), now.day(), now.hour(), now.minute(), now.second(), Color::RESET);
 }
 
-void NYXUS_SCANNER::sniffer_writer_task(void* arg) {
+inline void NYXUS_SCANNER::sniffer_writer_task(void* arg) {
    NYXUS_SCANNER* instance = static_cast<NYXUS_SCANNER*>(arg);
    SnifferFlushMsg msg;
    while(true) {
@@ -612,7 +643,7 @@ void NYXUS_SCANNER::sniffer_writer_task(void* arg) {
    vTaskDelete(NULL);
 }
 
-void NYXUS_SCANNER::promiscuous_rx_cb(void *buf, wifi_promiscuous_pkt_type_t type) {
+inline void NYXUS_SCANNER::promiscuous_rx_cb(void *buf, wifi_promiscuous_pkt_type_t type) {
    if (!active_sniffer_instance || !active_sniffer_instance->is_sniffing) return;
    wifi_promiscuous_pkt_t *pkt = (wifi_promiscuous_pkt_t *)buf;
    uint32_t len = pkt->rx_ctrl.sig_len;
@@ -639,8 +670,21 @@ void NYXUS_SCANNER::promiscuous_rx_cb(void *buf, wifi_promiscuous_pkt_type_t typ
    active_sniffer_instance->active_rx_offset += len;
 }
 
-void NYXUS_SCANNER::StartSniffing(const std::string& save_path) {
+inline void NYXUS_SCANNER::StartSniffing(const std::string& save_path) {
    if (is_sniffing) return;
+   if (active_sniffer_instance != nullptr && active_sniffer_instance != this) {
+      if (verbose) {
+         timestamp();
+         Serial.printf("[%sFATAL%s] Another scanner instance is already holding the radio lock!\n", Color::RED, Color::RESET);
+      }
+      return;
+   }
+   if (!sniffer_buffer_A) sniffer_buffer_A = (uint8_t*)heap_caps_malloc(SNIFFER_BUFFER_SIZE, MALLOC_CAP_SPIRAM);
+   if (!sniffer_buffer_B) sniffer_buffer_B = (uint8_t*)heap_caps_malloc(SNIFFER_BUFFER_SIZE, MALLOC_CAP_SPIRAM);
+   if (!sniffer_buffer_A || !sniffer_buffer_B) {
+      if (verbose) { timestamp(); Serial.printf("[%sFATAL%s] SRAM Heap exhausted. Cannot allocate sniffer buffers.\n", Color::RED, Color::RESET); }
+      return;
+   }
    if (!sd) {
       if (verbose) { timestamp(); Serial.printf("[%sERROR%s] No SD mount detected for PCAP storage.\n", Color::RED, Color::RESET); }
       return;
@@ -668,11 +712,12 @@ void NYXUS_SCANNER::StartSniffing(const std::string& save_path) {
    if (verbose) { timestamp(); Serial.printf("[%sSUCCESS%s] Promiscuous Mode Armed. Vacuuming packets.\n", Color::GREEN, Color::RESET); }
 }
 
-void NYXUS_SCANNER::StopSniffing() {
+inline void NYXUS_SCANNER::StopSniffing() {
    if (!is_sniffing) return;
    esp_wifi_set_promiscuous(false);
    esp_wifi_set_promiscuous_rx_cb(NULL);
    is_sniffing = false;
+   active_sniffer_instance = nullptr;
    if (active_rx_offset > 0) {
       SnifferFlushMsg msg = { active_rx_buffer, active_rx_offset };
       xQueueSend(sniffer_flush_queue, &msg, portMAX_DELAY);
@@ -682,20 +727,22 @@ void NYXUS_SCANNER::StopSniffing() {
    delay(init_delay_time);
    vQueueDelete(sniffer_flush_queue);
    if (sniffer_file) sniffer_file.close();
+   if (sniffer_buffer_A) { heap_caps_free(sniffer_buffer_A); sniffer_buffer_A = nullptr; }
+   if (sniffer_buffer_B) { heap_caps_free(sniffer_buffer_B); sniffer_buffer_B = nullptr; }
    if (verbose) { 
       timestamp(); Serial.printf("[%sSUCCESS%s] Sniffer disarmed. PCAP file finalized.\n", Color::GREEN, Color::RESET); 
       Serial.println("===============================");
    }
 }
 
-void NYXUS_SCANNER::SetChannel(uint8_t channel) {
+inline void NYXUS_SCANNER::SetChannel(uint8_t channel) {
    if (channel >= 1 && channel <= 13) {
       esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE);
       if (verbose) { timestamp(); Serial.printf("[%sINFO%s] Radio hopped to Channel %d\n", Color::CYAN, Color::RESET, channel); }
    }
 }
 
-void NYXUS_SCANNER::LoadScanConfig(const std::string& path){
+inline void NYXUS_SCANNER::LoadScanConfig(const std::string& path){
    if (!sd){
       if (verbose) {
          timestamp(); Serial.printf("[%sERROR%s] no mount detected\n", Color::RED, Color::RESET);
@@ -719,7 +766,7 @@ void NYXUS_SCANNER::LoadScanConfig(const std::string& path){
    }
 }
 
-void NYXUS_SCANNER::SaveScanConfig(const std::string& path){
+inline void NYXUS_SCANNER::SaveScanConfig(const std::string& path){
    if (!sd){
       if (verbose) { timestamp(); Serial.printf("[%sERROR%s] No mount detected.\n", Color::RED, Color::RESET); }
       return;
@@ -748,7 +795,7 @@ void NYXUS_SCANNER::SaveScanConfig(const std::string& path){
    }
 }
 
-void NYXUS_SCANNER::ResetScanConfig(){
+inline void NYXUS_SCANNER::ResetScanConfig(){
    scanConfig = ScanningConfig{
       .savePath = std::nullopt,
       .ports = {},
@@ -765,20 +812,20 @@ void NYXUS_SCANNER::ResetScanConfig(){
    }
 }
 
-void NYXUS_SCANNER::ChangeScanConfig(const ScanningConfig &conf){
+inline void NYXUS_SCANNER::ChangeScanConfig(const ScanningConfig &conf){
    scanConfig = conf;
    if (verbose){
       timestamp(); Serial.printf("[%sINFO%s] Scanning configuration manually updated in SRAM.\n", Color::YELLOW, Color::RESET);
    }
 }
 
-void NYXUS_SCANNER::Delete_ScanConfig(const std::string &path) {
+inline void NYXUS_SCANNER::Delete_ScanConfig(const std::string &path) {
    std::string filepath = path + Extension::scnconf;
    if (verbose) { timestamp(); Serial.printf("[%sINFO%s] Initiating deletion of scan config: %s\n", Color::RED, Color::RESET, filepath.c_str()); }
    DestroyFile(filepath);
 }
 
-void NYXUS_SCANNER::DestroyFile(const std::string& filepath) {
+inline void NYXUS_SCANNER::DestroyFile(const std::string& filepath) {
    if (!sd) {
       if (verbose) { timestamp(); Serial.printf("[%sERROR%s] No mount detected.\n", Color::RED, Color::RESET); }
       return;
@@ -792,6 +839,10 @@ void NYXUS_SCANNER::DestroyFile(const std::string& filepath) {
    } else {
       if (verbose) { timestamp(); Serial.printf("[%sINFO%s] Target file does not exist: %s\n", Color::YELLOW, Color::RESET, filepath.c_str()); }
    }
+}
+
+inline void NYXUS_SCANNER::setYieldCallback(void (*callback_func)()) {
+   ui_yield_callback = callback_func;
 }
 
 #endif
