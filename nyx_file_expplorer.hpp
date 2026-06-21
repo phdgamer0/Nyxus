@@ -34,13 +34,15 @@
 #define _NEXUS_FILE_EXPLORER_HPP_
 
 #include <cstdint>
+#include <functional>
+#include <vector>
+#include <Stream.h>
 #include <SdFat.h>
 #include <unordered_map>
 #include <optional>
 #include <string>
 #include <HardwareSerial.h>
 #include <Nyxus/nyx_terminal_graphics.hpp>
-
 
 /**
  * @namespace Key
@@ -129,10 +131,28 @@ class NYXUS_FILE_EXPLORER{
    };
 
    protected:
+   /** 
+   * @brief Active window cache strictly limited to terminal height. 0(1) Memory usage.
+   */
+   std::vector<FileNode> view_cache;
+
+   private:
    /**
-    * @brief 1D Vector to remember the CWD Files
-    */
-   std::vector<FileNode> Files;
+   * @brief Tracks the exact byte offset for the start of each line in the pager.
+   */
+   std::vector<uint32_t> pager_line_offsets;
+
+   private:
+   /** 
+   * @brief Non-blocking buffer storing active user keystrokes for UI prompts.
+   */
+   std::string prompt_input_buffer = "";
+   
+   private:
+   /**
+   * @brief Contextual title displayed during an active prompt.
+   */
+   std::string prompt_title = "";
 
    private:
    /**
@@ -150,7 +170,7 @@ class NYXUS_FILE_EXPLORER{
    /**
     * @brief Pointer to the hardware serial interface executing ANSI commands.
     */
-   HWCDC* serial = nullptr;
+   Stream* serial = nullptr;
 
    private:
    /**
@@ -162,19 +182,31 @@ class NYXUS_FILE_EXPLORER{
    /**
     * @brief Pointer to the function you want to run on each UI event.
     */
-   void (*HardwareCallback)(uint8_t event_type) = nullptr;
-
-   private:
-   /**
-    * @brief Hardware serial communication baud rate.
-    */
-   uint32_t Baud;
+   std::function<void(uint8_t)> HardwareCallback = nullptr;
 
    private:
    /**
     * @brief Page Offset
     */
    uint32_t pager_offset = 0;
+
+   private:
+   /**
+   * @brief The globally absolute index of the currently highlighted file.
+   */
+   uint32_t selected_index = 0;
+
+   private:
+   /**
+   * @brief The globally absolute index of the file at the very top of the terminal screen.
+   */
+   uint32_t top_index = 0;
+
+   private:
+   /**
+   * @brief The total number of files in the current physical directory.
+   */
+   uint32_t total_files = 0;
 
    private:
    /**
@@ -193,18 +225,6 @@ class NYXUS_FILE_EXPLORER{
     * @brief Character height of the connected terminal screen.
     */
    uint16_t Height;
-
-   private:
-   /**
-    * @brief Updated through helpers.
-    */
-   uint16_t cursPos = 1;
-
-   private:
-   /**
-    * @brief Updated through helpers, caches the number of files in the current directory, making the drawing faster.
-    */
-   uint16_t dirFileCounts = 1;
    
    private:
    /**
@@ -217,7 +237,7 @@ class NYXUS_FILE_EXPLORER{
     * @enduml EngineState
     * @brief Defines the modes.
     */
-   enum class EngineState : uint8_t { EXPLORER, PAGER };
+   enum class EngineState : uint8_t { EXPLORER, PAGER, PROMPT_MKDIR, PROMPT_MKFILE, PROMPT_RENAME, PROMPT_DELETE };
 
    private:
    /**
@@ -231,6 +251,12 @@ class NYXUS_FILE_EXPLORER{
     */
    bool needs_full_redraw = true;
 
+   private:
+   /**
+   * @brief Triggers a partial re-fetch from the SD card when the cursor slides off-screen.
+   */
+   bool needs_window_redraw = false;
+
    public:
    /**
     * @brief Instantiates the terminal-based File Explorer module.
@@ -243,7 +269,7 @@ class NYXUS_FILE_EXPLORER{
     * Binds the terminal interface to the active SD card volume and prepares the hardware buffers 
     * for rendering raw ANSI escape sequences at high refresh rates.
     */
-   NYXUS_FILE_EXPLORER(HWCDC* Serialptr, SdFat* SDptr, void (*handler)(uint8_t) = nullptr, const StyleConfig& Style = {}, uint8_t Fps = 30, const std::string& Path = "/") : serial(Serialptr), sd(SDptr), HardwareCallback(handler), style(Style), FPS(Fps), current_path(Path), Files(){
+   NYXUS_FILE_EXPLORER(Stream* Serialptr, SdFat* SDptr, void (*handler)(uint8_t) = nullptr, const StyleConfig& Style = {}, uint8_t Fps = 30, const std::string& Path = "/") : serial(Serialptr), sd(SDptr), HardwareCallback(handler), style(Style), FPS(Fps), current_path(Path){
       if (Fps < 1){
          FPS = 30;
       }
@@ -276,11 +302,11 @@ class NYXUS_FILE_EXPLORER{
     * the UI can scale dynamically.
     * @return void
     */
-   void Kickstart(const uint8_t& SdPin, uint32_t Baudrate = 115200, uint16_t BufferSize = 8192);
+   void Kickstart(const uint8_t SdPin, uint16_t BufferSize = 8192);
 
    public:
 
-   void AttachEventHandler(void (*handler)(uint8_t));
+   void AttachEventHandler(std::function<void(uint8_t)> handler);
 
    public:
 
@@ -368,6 +394,7 @@ class NYXUS_FILE_EXPLORER{
     * @return void
     */
    void SetTargetSerial(HWCDC* Serialptr);
+   
    public: 
    /**
     * @brief Jumps the explorer into a specific target directory.
@@ -386,18 +413,6 @@ class NYXUS_FILE_EXPLORER{
     * @return Boolean true if the sequence should abort.
     */
    bool ExplorerShouldEnd();
-
-   private:
-   /**
-    * @brief Suspends execution and captures raw keyboard input from the terminal user.
-    * @param prompt Optional message printed before freezing execution.
-    * @param bufferSize The maximum byte length expected from the terminal.
-    * @paragraph Memory Safety Architecture
-    * Securely traps the thread using `readBytesUntil` and formats the captured payload into a safe C++ string. 
-    * Completely eliminates the Use-After-Free heap crash associated with standard stack char arrays.
-    * @return The sanitized string response extracted from the terminal interface.
-    */
-   std::string GetInputResponse(const char* prompt = nullptr, const size_t& bufferSize = 64);
    
    private:
    /**
@@ -422,17 +437,6 @@ class NYXUS_FILE_EXPLORER{
 
    private:
    /**
-    * @brief Prompts the user and creates a new file or directory on the FAT32 volume.
-    * @param is_dir Boolean flag defining whether to create a folder (true) or a file (false).
-    * @paragraph Execution
-    * Captures user input for the name, constructs the absolute path, and commands 
-    * the SD controller to write the new entry into the filesystem.
-    * @return void
-    */
-   void ExecuteMake(bool is_dir);
-
-   private:
-   /**
     * @brief Recursively deletes a directory and all of its nested contents.
     * @param target_path The absolute path of the directory to remove.
     * @paragraph Recursive Deletion
@@ -443,24 +447,12 @@ class NYXUS_FILE_EXPLORER{
    bool Rm_RF_Directory(const std::string& target_path);
 
    private:
-   /**
-    * @brief Handles the deletion process for the currently selected file or directory.
-    * @paragraph Execution
-    * Clears the serial input buffer, prompts the user for confirmation, and passes 
-    * the target path to the filesystem removal methods.
-    * @return void
-    */
-   void ExecuteDelete();
+   /** @brief Asynchronous state handler for typing inputs. */
+   void RunPrompt(uint8_t input, EngineState target_operation);
 
    private:
-   /**
-    * @brief Handles the renaming process for the currently selected file or directory.
-    * @paragraph Execution
-    * Prompts the user for a new name, constructs the updated absolute path, and 
-    * updates the FAT32 allocation table.
-    * @return void
-    */
-   void ExecuteRename();
+   /** @brief Asynchronous state handler for deletion confirmation. */
+   void RunDeletePrompt(uint8_t input);
 
    private:
    /**
@@ -509,14 +501,11 @@ class NYXUS_FILE_EXPLORER{
 
 /* IMPLEMENTATIONS - NOTHING HERE */
 
-void NYXUS_FILE_EXPLORER::Kickstart(const uint8_t& SdPin, uint32_t Baudrate = 115200, uint16_t BufferSize = 8192){
+void NYXUS_FILE_EXPLORER::Kickstart(const uint8_t SdPin, uint16_t BufferSize){
    BufferTextSize = BufferSize;
-   serial->begin(115200);
-   serial->setTxBufferSize(BufferSize);
-   serial->setRxBufferSize(BufferSize);
-   if(serial->isConnected()){
+   if(serial){
       serial->write(Cursor::HIDE);
-      serial->printf("[%sEXPLORER%s] Connected to Serial %p with buffer size %d bytes on baud %d\n", Color::GREEN, Color::RESET, serial, BufferTextSize, serial->baudRate());
+      serial->printf("[%sEXPLORER%s] Connected to Serial %p with buffer size %d bytes\n", Color::GREEN, Color::RESET, serial, BufferTextSize);
       char buf[16];
       serial->write(Cursor::GETSIZE, strlen(Cursor::GETSIZE));
       size_t ret = serial->readBytesUntil('R', buf, 16);
@@ -527,7 +516,7 @@ void NYXUS_FILE_EXPLORER::Kickstart(const uint8_t& SdPin, uint32_t Baudrate = 11
       Height = size.second;
    }
    else{
-      serial->printf("[%sEXPLORER%s] Failed to connect to Serial %p with buffer size %d bytes on baud %d\n", Color::RED, Color::RESET, serial, BufferTextSize, serial->baudRate());
+      serial->printf("[%sEXPLORER%s] Failed to connect to Serial %p with buffer size %d bytes \n", Color::RED, Color::RESET, serial, BufferTextSize);
    }
    if (sd->begin(SdPin)){
       serial->printf("[%sEXPLORER%s] Connected to SD card: ", Color::GREEN, Color::RESET);
@@ -539,12 +528,86 @@ void NYXUS_FILE_EXPLORER::Kickstart(const uint8_t& SdPin, uint32_t Baudrate = 11
    }
 }
 
-void NYXUS_FILE_EXPLORER::AttachEventHandler(void (*handler)(uint8_t)) {
+void NYXUS_FILE_EXPLORER::AttachEventHandler(std::function<void(uint8_t)> handler) {
    HardwareCallback = handler;
 }
 
 void NYXUS_FILE_EXPLORER::DetachEventHandler(void (*handler)(uint8_t)) {
    HardwareCallback = nullptr;
+}
+
+void NYXUS_FILE_EXPLORER::RunDeletePrompt(uint8_t input) {
+   if (input == 'y' || input == 'Y') {
+      FileNode& target = view_cache[selected_index - top_index];
+      std::string full_target = current_path;
+      if (full_target.back() != '/') full_target += '/';
+      full_target += target.raw_name;
+      Rm_RF_Directory(full_target);
+      if (HardwareCallback) HardwareCallback(UIEvent::DELETED);
+      current_state = EngineState::EXPLORER;
+      needs_full_redraw = true;
+   }
+   else if (input == 'n' || input == 'N' || input == Key::ESC) {
+      current_state = EngineState::EXPLORER;
+      needs_full_redraw = true;
+   }
+   else if (input == Key::NONE && !needs_full_redraw) return;
+   FileNode& target = view_cache[selected_index - top_index];
+   serial->write(Cursor::TOXY(1, Height));
+   serial->write(Clear::LNE);
+   serial->write(style.BackgroundColor);
+   serial->write(Font::REVERSE);
+   serial->printf(" DELETE '%s'? (y/n): ", target.raw_name.c_str());
+   serial->write(Font::RESET);
+   needs_full_redraw = false;
+}
+
+void NYXUS_FILE_EXPLORER::RunPrompt(uint8_t input, EngineState target_operation) {
+   if (input == Key::ESC) {
+      current_state = EngineState::EXPLORER;
+      needs_full_redraw = true;
+      return;
+   }
+   if (input == Key::ENTER) {
+      while(!prompt_input_buffer.empty() && (prompt_input_buffer.back() == '\n' || prompt_input_buffer.back() == '\r')) prompt_input_buffer.pop_back();
+      if (!prompt_input_buffer.empty()) {
+         if (target_operation == EngineState::PROMPT_MKDIR || target_operation == EngineState::PROMPT_MKFILE) {
+            std::string full_target = current_path;
+            if (full_target.back() != '/') full_target += '/';
+            full_target += prompt_input_buffer;
+            if (target_operation == EngineState::PROMPT_MKDIR) {
+               sd->mkdir(full_target.c_str());
+               if (HardwareCallback) HardwareCallback(UIEvent::MADE);
+            }
+            else {
+               FsFile f = sd->open(full_target.c_str(), O_CREAT | O_WRITE);
+               if (f) f.close();
+               if (HardwareCallback) HardwareCallback(UIEvent::TOUCHED);
+            }
+         } else if (target_operation == EngineState::PROMPT_RENAME) {
+            FileNode& target = view_cache[selected_index - top_index];
+            std::string old_path = current_path;
+            if (old_path.back() != '/') old_path += '/';
+            old_path += target.raw_name;
+            std::string new_path = current_path;
+            if (new_path.back() != '/') new_path += '/';
+            new_path += prompt_input_buffer;
+            sd->rename(old_path.c_str(), new_path.c_str());
+            if (HardwareCallback) HardwareCallback(UIEvent::RENAMED);
+         }
+      }
+      current_state = EngineState::EXPLORER;
+      needs_full_redraw = true;
+      return;
+   }
+   if (input == '\b' || input == 0x7F) if (!prompt_input_buffer.empty()) prompt_input_buffer.pop_back();
+   else if (input >= 32 && input <= 126 && prompt_input_buffer.length() < 64) prompt_input_buffer += (char)input;
+   serial->write(Cursor::TOXY(1, Height));
+   serial->write(Clear::LNE);
+   serial->write(style.BackgroundColor);
+   serial->write(Font::REVERSE);
+   serial->printf("%s%s", prompt_title.c_str(), prompt_input_buffer.c_str());
+   serial->write(Font::RESET);
 }
 
 void NYXUS_FILE_EXPLORER::SetStyleConfig(const StyleConfig& __nConfig){
@@ -569,13 +632,6 @@ void NYXUS_FILE_EXPLORER::RemoveExtensionColor(const char* EXT){
    style.ExtensionColors.value().erase(EXT);
 }
 
-void NYXUS_FILE_EXPLORER::SetTargetBufferSize(uint32_t Size){
-   BufferTextSize = Size;
-   serial->setTxBufferSize(Size);
-   serial->setRxBufferSize(Size);
-   serial->printf("[%sEXPLORER%s] Rx and Tx buffer size set to %d\n", Color::RED, Color::RESET, Size);
-}
-
 void NYXUS_FILE_EXPLORER::SetTargetFPS(uint8_t FPS){
    if (FPS < 1){
       serial->printf("[%sERROR%s] FPS cant be set to %d\n", Color::RED, Color::RESET, FPS);
@@ -594,10 +650,7 @@ void NYXUS_FILE_EXPLORER::SetTargetSD(SdFat* SDptr){
 
 void NYXUS_FILE_EXPLORER::SetTargetSerial(HWCDC* Serialptr){
    if(!serial) serial = Serialptr;
-   else{
-      serial->end();
-      Kickstart(Baud, BufferTextSize);
-   }
+   else Kickstart(BufferTextSize);
    serial->printf("[%sEXPLORER%s] Connected to Serial: %p\n", Color::GREEN, Color::RESET, serial);
 }
 
@@ -612,35 +665,7 @@ void NYXUS_FILE_EXPLORER::SetTargetPath(const std::string& Path){
 }
 
 bool NYXUS_FILE_EXPLORER::ExplorerShouldEnd(){
-   return !serial->isConnected();
-}
-
-std::string NYXUS_FILE_EXPLORER::GetInputResponse(const char* prompt = nullptr, const size_t& bufferSize = 64){
-   while(serial->available()) serial->read();
-   if(prompt) serial->write(prompt, strlen(prompt));
-   std::string result;
-   while(true){
-      if (serial->available()) {
-         char c = serial->read();
-         if (c == '\r' || c == '\n') {
-            break;
-         }
-         if (c == Key::ESC) {
-            return "";
-         }
-         if (c == '\b' || c == 0x7F) {
-            if (!result.empty()) {
-               result.pop_back();
-               serial->write("\b \b");
-            }
-         } else if (result.length() < bufferSize) {
-            result += c;
-            serial->write(c);
-         }
-      }
-      vTaskDelay(pdMS_TO_TICKS(10));
-   }
-   return result;
+   return !serial->available();
 }
 
 uint8_t NYXUS_FILE_EXPLORER::PollKeyboard() {
@@ -668,7 +693,7 @@ uint8_t NYXUS_FILE_EXPLORER::PollKeyboard() {
    return c;
 }
 
-inline char* NYXUS_FILE_EXPLORER::GetExtension(char* start, const size_t& len, const bool& includeDot = true){
+inline char* NYXUS_FILE_EXPLORER::GetExtension(char* start, const size_t& len, const bool& includeDot){
    for(char* i = start + len - 1; i >= start; --i){
       if (*i == '.'){
          return includeDot ? i : i + 1;
@@ -677,109 +702,40 @@ inline char* NYXUS_FILE_EXPLORER::GetExtension(char* start, const size_t& len, c
    return start + len;
 }
 
-void NYXUS_FILE_EXPLORER::ExecuteMake(bool is_dir) {
-   serial->write(Cursor::TOXY(1, Height));
-   serial->write(Clear::LNE);
-   serial->write(style.BackgroundColor);
-   serial->write(Font::REVERSE);
-   std::string name = GetInputResponse(is_dir ? " NEW FOLDER NAME: " : " NEW FILE NAME: ");
-   while(!name.empty() && (name.back() == '\n' || name.back() == '\r')) {
-      name.pop_back();
-   }
-   if (!name.empty()) {
-      std::string full_target = current_path;
-      if (full_target.back() != '/') full_target += '/';
-      full_target += name;
-      if (is_dir) {
-         sd->mkdir(full_target.c_str());
-      } else {
-         FsFile f = sd->open(full_target.c_str(), O_CREAT | O_WRITE);
-         if (f) f.close();
-      }
-   }
-   serial->write(Font::RESET);
-   needs_full_redraw = true;
-}
-
 bool NYXUS_FILE_EXPLORER::Rm_RF_Directory(const std::string& target_path) {
-   FsFile f = sd->open(target_path.c_str(), O_READ);
-   if (!f) return false;
-   
-   if (!f.isDir()) {
-      f.close();
-      return sd->remove(target_path.c_str());
-   }
-   
-   f.rewind();
-   FsFile entry;
-   while (entry.openNext(&f, O_READ)) {
-      char name[256];
-      entry.getName(name, sizeof(name));
-      entry.close();
-      
-      if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0) continue;
-      
-      std::string sub_path = target_path;
-      if (sub_path.back() != '/') sub_path += '/';
-      sub_path += name;
-      
-      Rm_RF_Directory(sub_path);
-   }
-   f.close();
-   return sd->rmdir(target_path.c_str());
-}
-
-void NYXUS_FILE_EXPLORER::ExecuteDelete() {
-   FileNode& target = Files[cursPos - 1];
-   if (target.raw_name == "." || target.raw_name == "..") return;
-   serial->write(Cursor::TOXY(1, Height));
-   serial->write(Clear::LNE);
-   serial->write(style.BackgroundColor);
-   serial->write(Font::REVERSE);
-   serial->printf(" DELETE '%s'? (y/n): ", target.raw_name.c_str());
-   while(serial->available()) serial->read();
-   char response = 0;
-   while(true) {
-      if (serial->available()) {
-         response = serial->read();
-         break;
+   std::vector<std::string> dirs_to_delete;
+   std::vector<std::string> stack;
+   stack.push_back(target_path);
+   while (!stack.empty()) {
+      std::string current = stack.back();
+      stack.pop_back();
+      FsFile f = sd->open(current.c_str(), O_READ);
+      if (!f) continue;
+      if (!f.isDir()) {
+         f.close();
+         sd->remove(current.c_str());
+         continue;
       }
-      vTaskDelay(pdMS_TO_TICKS(10));
+      dirs_to_delete.push_back(current);
+      f.rewind();
+      FsFile entry;
+      while (entry.openNext(&f, O_READ)) {
+         char name[256];
+         entry.getName(name, sizeof(name));
+         entry.close();
+         if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0) continue;
+         std::string sub_path = current;
+         if (sub_path.back() != '/') sub_path += '/';
+         sub_path += name;
+         stack.push_back(sub_path);
+      }
+      f.close();
    }
-   serial->write(Font::RESET);
-   if (response == 'y' || response == 'Y') {
-      std::string full_target = current_path;
-      if (full_target.back() != '/') full_target += '/';
-      full_target += target.raw_name;
-      
-      Rm_RF_Directory(full_target);
+   bool success = true;
+   for (auto it = dirs_to_delete.rbegin(); it != dirs_to_delete.rend(); ++it) {
+      if (!sd->rmdir(it->c_str())) success = false;
    }
-   needs_full_redraw = true;
-}
-
-void NYXUS_FILE_EXPLORER::ExecuteRename() {
-   FileNode& target = Files[cursPos - 1];
-   if (target.raw_name == "." || target.raw_name == "..") return;
-   serial->write(Cursor::TOXY(1, Height));
-   serial->write(Clear::LNE);
-   serial->write(style.BackgroundColor);
-   serial->write(Font::REVERSE);
-   serial->printf(" RENAME '%s' TO: ", target.raw_name.c_str());
-   std::string new_name = GetInputResponse("");
-   while(!new_name.empty() && (new_name.back() == '\n' || new_name.back() == '\r')) {
-      new_name.pop_back();
-   }
-   if (!new_name.empty()) {
-      std::string old_path = current_path;
-      if (old_path.back() != '/') old_path += '/';
-      old_path += target.raw_name;
-      std::string new_path = current_path;
-      if (new_path.back() != '/') new_path += '/';
-      new_path += new_name;
-      sd->rename(old_path.c_str(), new_path.c_str());
-   }
-   serial->write(Font::RESET);
-   needs_full_redraw = true;
+   return success;
 }
 
 void NYXUS_FILE_EXPLORER::ExecutePaste() {
@@ -805,11 +761,13 @@ void NYXUS_FILE_EXPLORER::ExecutePaste() {
    }
    FsFile dest = sd->open(dest_path.c_str(), O_WRITE | O_CREAT | O_TRUNC);
    if (dest) {
-      uint8_t buf[2048];
-      int bytesRead;
-      while ((bytesRead = src.read(buf, sizeof(buf))) > 0) {
-         dest.write(buf, bytesRead);
-      }
+      uint8_t* buf = new (std::nothrow) uint8_t[2048];
+      if (buf) {
+         int bytesRead;
+         while ((bytesRead = src.read(buf, 2048)) > 0) dest.write(buf, bytesRead);
+         delete[] buf;
+      } 
+      else serial->printf(" [%sERROR%s] SRAM exhausted. Paste failed. ", Color::RED, Color::RESET);
       dest.close();
    }
    src.close();
@@ -819,19 +777,14 @@ void NYXUS_FILE_EXPLORER::ExecutePaste() {
 void NYXUS_FILE_EXPLORER::RunPager(uint8_t input) {
    if (input == 'q' || input == 'Q' || input == Key::ESC) {
       current_state = EngineState::EXPLORER;
+      pager_line_offsets.clear();
       needs_full_redraw = true;
       return;
    }
-   if (input == Key::DOWN || input == Key::ENTER) {
-      pager_offset++;
-   } 
-   else if (input == Key::UP) {
-      if (pager_offset > 0) pager_offset--;
-   } 
-   else if (input == Key::NONE && !needs_full_redraw) {
-      return; 
-   }
-   FileNode& target = Files[cursPos - 1];
+   if (input == Key::DOWN || input == Key::ENTER) pager_offset++;
+   else if (input == Key::UP) if (pager_offset > 0) pager_offset--;
+   else if (input == Key::NONE && !needs_full_redraw) return;
+   FileNode& target = view_cache[selected_index - top_index];
    std::string full_target = current_path;
    if (full_target.back() != '/') full_target += '/';
    full_target += target.raw_name;
@@ -841,20 +794,23 @@ void NYXUS_FILE_EXPLORER::RunPager(uint8_t input) {
       needs_full_redraw = true;
       return;
    }
+   f.seek(pager_line_offsets.back());
+   while (pager_line_offsets.size() <= pager_offset + Height && f.available()) {
+      char dummy[256];
+      f.fgets(dummy, sizeof(dummy));
+      pager_line_offsets.push_back(f.position());
+   }
    serial->write(style.BackgroundColor);
    serial->write(Clear::ALL);
    serial->write(Cursor::TOXY(1,1));
-   for(uint32_t i = 0; i < pager_offset; ++i) {
-      char dummy[128];
-      if(f.available()) f.fgets(dummy, sizeof(dummy));
-      else break;
-   }
+   if (pager_offset < pager_line_offsets.size()) f.seek(pager_line_offsets[pager_offset]);
    for(uint32_t i = 0; i < Height - 1; ++i) {
       char line[256];
       if(f.available()) {
          int n = f.fgets(line, sizeof(line));
          if(n > 0) serial->write(line);
-      } else break;
+      }
+      else break;
    }
    f.close();
    serial->write(Cursor::TOXY(1, Height));
@@ -864,53 +820,125 @@ void NYXUS_FILE_EXPLORER::RunPager(uint8_t input) {
    needs_full_redraw = false;
 }
 
-void NYXUS_FILE_EXPLORER::Draw(uint8_t hardware_override = Key::NONE){
+void NYXUS_FILE_EXPLORER::Draw(uint8_t hardware_override){
    uint8_t input = (hardware_override != Key::NONE) ? hardware_override : PollKeyboard();
    if (current_state == EngineState::PAGER) {
       RunPager(input);
       return;
    }
-   if (needs_full_redraw){
-      Files.clear();
-      dirFileCounts = 1;
-      cursPos = 1;
+   if (current_state == EngineState::PROMPT_DELETE) { RunDeletePrompt(input); return; }
+   if (current_state == EngineState::PROMPT_MKDIR || current_state == EngineState::PROMPT_MKFILE || current_state == EngineState::PROMPT_RENAME) {
+      RunPrompt(input, current_state); 
+      return; 
+   }
+   if (needs_full_redraw) {
+      total_files = 2;
       FsFile dir = sd->open(current_path.c_str(), O_READ);
-      if (!dir || !dir.isDir()) {
-         serial->printf("[%sERROR%s] Failed to open directory: %s\n", Color::RED, Color::RESET, current_path.c_str());
-         return;
+      if (dir) {
+         FsFile it;
+         while(it.openNext(&dir, O_READ)) { total_files++; it.close(); }
+         dir.close();
       }
-      Files.push_back({".", ".", style.DirectoryColor, true});
-      Files.push_back({"..", "..", style.DirectoryColor, true});
+      selected_index = 0;
+      top_index = 0;
+      needs_full_redraw = false;
+      needs_window_redraw = true;
+   }
+   if (input == Key::UP) {
+      if (selected_index > 0) {
+         uint32_t old_index = selected_index;
+         selected_index--;
+         if (selected_index < top_index) {
+            top_index = selected_index;
+            needs_window_redraw = true;
+         }
+         else if (!needs_window_redraw) {
+            serial->write(Cursor::TOXY(1, (old_index - top_index) + 2));
+            serial->write(style.BackgroundColor);
+            serial->write(view_cache[old_index - top_index].color);
+            serial->write(view_cache[old_index - top_index].display_name.c_str());
+            serial->write(Color::RESET);
+            serial->write(Cursor::TOXY(1, (selected_index - top_index) + 2));
+            serial->write(style.BackgroundColor);
+            serial->write(Font::REVERSE);
+            serial->write(view_cache[selected_index - top_index].color);
+            serial->write(view_cache[selected_index - top_index].display_name.c_str());
+            serial->write(Color::RESET);
+            serial->write(Font::RESET);
+            if (HardwareCallback) HardwareCallback(UIEvent::MOVEDUP);
+         }
+      }
+   }
+   else if (input == Key::DOWN) {
+      if (selected_index < total_files - 1) {
+         uint32_t old_index = selected_index;
+         selected_index++;
+         
+         if (selected_index >= top_index + (Height - 2)) {
+            top_index = selected_index - (Height - 2) + 1;
+            needs_window_redraw = true;
+         } else if (!needs_window_redraw) {
+            serial->write(Cursor::TOXY(1, (old_index - top_index) + 2));
+            serial->write(style.BackgroundColor);
+            serial->write(view_cache[old_index - top_index].color);
+            serial->write(view_cache[old_index - top_index].display_name.c_str());
+            serial->write(Color::RESET);
+            serial->write(Cursor::TOXY(1, (selected_index - top_index) + 2));
+            serial->write(style.BackgroundColor);
+            serial->write(Font::REVERSE);
+            serial->write(view_cache[selected_index - top_index].color);
+            serial->write(view_cache[selected_index - top_index].display_name.c_str());
+            serial->write(Color::RESET);
+            serial->write(Font::RESET);
+            if (HardwareCallback) HardwareCallback(UIEvent::MOVEDDOWN);
+         }
+      }
+   }
+   if (needs_window_redraw) {
+      view_cache.clear();
+      FsFile dir = sd->open(current_path.c_str(), O_READ);
       FsFile it;
-      while(it.openNext(&dir, O_READ)){
-         char name[256];
-         it.getName(name, 256);
-         const char* c = style.FileColor;
-         bool is_directory = it.isDir();
-         if(is_directory){
-            c = style.DirectoryColor;
-         }
-         else if(it.isHidden() && style.ShowHiddenFiles){
-            c = style.HiddenFileColor;
-         }
+      uint32_t current_idx = 0;
+      uint32_t limit = (Height - 2);
+      for (uint32_t i = 0; i < limit && (top_index + i) < total_files; i++) {
+         uint32_t target_idx = top_index + i;
+         std::string name;
+         bool is_dir = false;
+         uint64_t size = 0;
+         if (target_idx == 0) { name = "."; is_dir = true; }
+         else if (target_idx == 1) { name = ".."; is_dir = true; }
          else {
-            if(style.ExtensionColors.has_value()){
-               std::string ext(GetExtension(name, strlen(name)));
+            while (current_idx <= (target_idx - 2)) {
+               it.close();
+               it.openNext(&dir, O_READ);
+               current_idx++;
+            }
+            char buf[256];
+            it.getName(buf, sizeof(buf));
+            name = buf;
+            is_dir = it.isDir();
+            size = it.fileSize();
+         }
+         const char* c = style.FileColor;
+         if (is_dir) c = style.DirectoryColor;
+         else if (name.length() > 0 && name[0] == '.') c = style.HiddenFileColor;
+         else if (style.ExtensionColors.has_value()) {
+            char* dot = GetExtension((char*)name.c_str(), name.length(), true);
+            if (dot) {
+               std::string ext(dot);
                auto match = style.ExtensionColors.value().find(ext);
-               if (match != style.ExtensionColors.value().end()){
-                  c = match->second;
-               }
+               if (match != style.ExtensionColors.value().end()) c = match->second;
             }
          }
-         std::string display_string = name;
-         if (style.ShowSizes && !is_directory) {
-            char size_buf[32];
-            snprintf(size_buf, sizeof(size_buf), " [%llu B]", it.fileSize());
-            display_string += size_buf;
+         std::string display = name;
+         if (!is_dir && style.ShowSizes) {
+            char sz_buf[32];
+            snprintf(sz_buf, sizeof(sz_buf), " [%llu B]", size);
+            display += sz_buf;
          }
-         Files.push_back({name, display_string, c, is_directory});
-         it.close();
+         view_cache.push_back({name, display, c, is_dir});
       }
+      it.close();
       dir.close();
       serial->write(style.BackgroundColor);
       serial->write(Clear::ALL);
@@ -919,80 +947,58 @@ void NYXUS_FILE_EXPLORER::Draw(uint8_t hardware_override = Key::NONE){
       serial->write(Font::REVERSE);
       serial->printf(" [ PATH: %s ] ", current_path.c_str());
       serial->write(Font::RESET);
-      for(size_t i = 0; i < Files.size() && (i + 2) <= Height; ++i) {
+      for (size_t i = 0; i < view_cache.size(); i++) {
          serial->write(Cursor::TOXY(1, i + 2));
          serial->write(style.BackgroundColor);
-         if (i + 1 == cursPos) serial->write(Font::REVERSE);
-         serial->write(Files[i].color);
-         serial->write(Files[i].display_name.c_str());
+         if (top_index + i == selected_index) serial->write(Font::REVERSE);
+         serial->write(view_cache[i].color);
+         serial->write(view_cache[i].display_name.c_str());
          serial->write(Color::RESET);
          serial->write(Font::RESET);
-         dirFileCounts++;
       }
-      needs_full_redraw = false;
+      needs_window_redraw = false;
    }
-   else if (input == Key::UP){
-      if (cursPos > 1) {
-         serial->write(Cursor::TOXY(1, cursPos + 1));
-         serial->write(style.BackgroundColor);
-         serial->write(Files[cursPos - 1].color);
-         serial->write(Files[cursPos - 1].display_name.c_str());
-         serial->write(Color::RESET);
-         cursPos--;
-         serial->write(Cursor::TOXY(1, cursPos + 1));
-         serial->write(style.BackgroundColor);
-         serial->write(Font::REVERSE);
-         serial->write(Files[cursPos - 1].color);
-         serial->write(Files[cursPos - 1].display_name.c_str());
-         serial->write(Color::RESET);
-         serial->write(Font::RESET);
-         if (HardwareCallback) HardwareCallback(UIEvent::MOVEDUP);
-      }
-   }
-   else if (input == Key::DOWN){
-      if (cursPos < Files.size() && cursPos < (Height - 1)) {
-         serial->write(Cursor::TOXY(1, cursPos + 1));
-         serial->write(style.BackgroundColor);
-         serial->write(Files[cursPos - 1].color);
-         serial->write(Files[cursPos - 1].display_name.c_str());
-         serial->write(Color::RESET);
-         cursPos++;
-         serial->write(Cursor::TOXY(1, cursPos + 1));
-         serial->write(style.BackgroundColor);
-         serial->write(Font::REVERSE);
-         serial->write(Files[cursPos - 1].color);
-         serial->write(Files[cursPos - 1].display_name.c_str());
-         serial->write(Color::RESET);
-         serial->write(Font::RESET);
-         if (HardwareCallback) HardwareCallback(UIEvent::MOVEDDOWN);
-      }
-   }
-   else if (input == 'm' || input == 'M'){
-      ExecuteMake(true);
-      if (HardwareCallback) HardwareCallback(UIEvent::MADE);
+   if (input == 'm' || input == 'M'){
+      current_state = EngineState::PROMPT_MKDIR;
+      prompt_title = " NEW FOLDER NAME: ";
+      prompt_input_buffer = "";
+      RunPrompt(Key::NONE, current_state);
    }
    else if (input == 't' || input == 'T'){
-      ExecuteMake(false);
-      if (HardwareCallback) HardwareCallback(UIEvent::TOUCHED);
+      current_state = EngineState::PROMPT_MKFILE;
+      prompt_title = " NEW FILE NAME: ";
+      prompt_input_buffer = "";
+      RunPrompt(Key::NONE, current_state);
    }
    else if (input == 'd' || input == 'D' || input == Key::RIGHT){
-      ExecuteDelete();
-      if (HardwareCallback) HardwareCallback(UIEvent::DELETED);
+      FileNode& target = view_cache[selected_index - top_index];
+      if (target.raw_name != "." && target.raw_name != "..") {
+         current_state = EngineState::PROMPT_DELETE;
+         RunDeletePrompt(Key::NONE);
+      }
    }
    else if (input == 'r' || input == 'R'){
-      ExecuteRename();
-      if (HardwareCallback) HardwareCallback(UIEvent::RENAMED);
+      FileNode& target = view_cache[selected_index - top_index];
+      if (target.raw_name != "." && target.raw_name != "..") {
+         current_state = EngineState::PROMPT_RENAME;
+         char titleBuf[64];
+         snprintf(titleBuf, sizeof(titleBuf), " RENAME '%s' TO: ", target.raw_name.c_str());
+         prompt_title = titleBuf;
+         prompt_input_buffer = "";
+         RunPrompt(Key::NONE, current_state);
+      }
    }
    else if (input == 'y' || input == 'Y'){
-      if (Files[cursPos - 1].raw_name != "." && Files[cursPos - 1].raw_name != "..") {
+      FileNode& target = view_cache[selected_index - top_index];
+      if (target.raw_name != "." && target.raw_name != "..") {
          clipboard_path = current_path;
          if (clipboard_path.back() != '/') clipboard_path += '/';
-         clipboard_path += Files[cursPos - 1].raw_name;
+         clipboard_path += target.raw_name;
          serial->write(Cursor::TOXY(1, Height));
          serial->write(Clear::LNE);
          serial->write(style.BackgroundColor);
          serial->write(Font::REVERSE);
-         serial->printf(" YANKED: %s ", Files[cursPos - 1].raw_name.c_str());
+         serial->printf(" YANKED: %s ", target.raw_name.c_str());
          serial->write(Font::RESET);
          if (HardwareCallback) HardwareCallback(UIEvent::YANKED);
       }
@@ -1002,16 +1008,19 @@ void NYXUS_FILE_EXPLORER::Draw(uint8_t hardware_override = Key::NONE){
       if (HardwareCallback) HardwareCallback(UIEvent::PASTED);
    }
    else if (input == 'c' || input == 'C'){
-      if (!Files[cursPos - 1].is_dir) {
+      FileNode& target = view_cache[selected_index - top_index];
+      if (!target.is_dir) {
          current_state = EngineState::PAGER;
          pager_offset = 0;
+         pager_line_offsets.clear();
+         pager_line_offsets.push_back(0);
          needs_full_redraw = true;
          RunPager(Key::NONE);
          if (HardwareCallback) HardwareCallback(UIEvent::OPENED);
       }
    }
    else if (input == Key::ENTER){
-      FileNode& target = Files[cursPos - 1];
+      FileNode& target = view_cache[selected_index - top_index];
       if (target.is_dir) {
          if (target.raw_name == ".") {
             return; 
@@ -1019,19 +1028,13 @@ void NYXUS_FILE_EXPLORER::Draw(uint8_t hardware_override = Key::NONE){
          else if (target.raw_name == "..") {
             size_t last_slash = current_path.find_last_of('/');
             if (last_slash != std::string::npos) {
-               if (last_slash == 0) {
-                  current_path = "/";
-               }
-               else {
-                  current_path = current_path.substr(0, last_slash);
-               }
+               if (last_slash == 0) { current_path = "/"; }
+               else { current_path = current_path.substr(0, last_slash); }
             }
             needs_full_redraw = true;
          } 
          else {
-            if (current_path.back() != '/') {
-               current_path += '/';
-            }
+            if (current_path.back() != '/') current_path += '/';
             current_path += target.raw_name;
             needs_full_redraw = true;
          }
@@ -1046,7 +1049,7 @@ void NYXUS_FILE_EXPLORER::Draw(uint8_t hardware_override = Key::NONE){
    }
 }
 
-void NYXUS_FILE_EXPLORER::Refresh(uint32_t ms = 0){
+void NYXUS_FILE_EXPLORER::Refresh(uint32_t ms){
    vTaskDelay(pdMS_TO_TICKS(ms + 1000 / FPS));
    if (!needs_full_redraw) serial->flush();
 }
