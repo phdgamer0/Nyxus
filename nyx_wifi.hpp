@@ -211,11 +211,11 @@ class NYXUS_WIFI{
       RTC_DS3231* rtc_module = nullptr,
       ConnectionConfig Conconfig = {
          .connection_wait_time_ms = 200,
-         .ip1     = ESP_IP4TOUINT32(192, 168, 1, 1),
-         .gateway = ESP_IP4TOUINT32(192, 168, 1, 1),
-         .subnet  = ESP_IP4TOUINT32(255, 255, 255, 0),
-         .dns1    = ESP_IP4TOUINT32(8, 8, 8, 8),
-         .dns2    = ESP_IP4TOUINT32(8, 8, 4, 4),
+         .ip1     = ESP_IP4TOUINT32(0, 0, 0, 0),
+         .gateway = ESP_IP4TOUINT32(0, 0, 0, 0),
+         .subnet  = ESP_IP4TOUINT32(0, 255, 255, 255),
+         .dns1    = ESP_IP4TOUINT32(0, 0, 0, 0),
+         .dns2    = ESP_IP4TOUINT32(0, 0, 0, 0),
          .retry_amount = 5
       }): timestampEnabled(timestamp), verbose(toggleVerbosity), config(Conconfig), Targets(), sd(disk), rtc_ptr(rtc_module) {};
 
@@ -519,9 +519,10 @@ class NYXUS_WIFI{
     * @param channel The 802.11 Wi-Fi channel to broadcast on (1-13).
     * @param hidden If true, drops the SSID from beacon frames, hiding it from standard network scans.
     * @param max_connections Maximum allowed client devices (ESP32 silicon maximum is typically 10).
+    * @param ipconf The ip that the network be spoofed as. Dont touch if not running mitm or injections
     * @return void
     */
-   inline void HostNetwork(const char* ssid, const char* pswd = "", uint8_t channel = 6, bool hidden = false, uint8_t max_connections = 4);
+   inline void HostNetwork(const char* ssid, const char* pswd = "", uint8_t channel = 6, bool hidden = false, uint8_t max_connections = 4, const ForgedIPConfig& ipconf = {});
 
    private:
    /**
@@ -718,7 +719,7 @@ inline void NYXUS_WIFI::displayConfig(){
       Serial.printf("Subnet mask: %s%s%s\n", Color::ORANGE, buf_sub, Color::RESET);
       Serial.printf("DNS primary: %s%s%s\n", Color::MAGENTA, buf_d1, Color::RESET);
       Serial.printf("DNS secondary: %s%s%s\n", Color::CYAN, buf_d2, Color::RESET);
-      Serial.printf("Wait time: %s%lldms%s\n", Color::OLIVE, config.connection_wait_time_ms, Color::RESET);
+      Serial.printf("Wait time: %s%ums%s\n", Color::OLIVE, config.connection_wait_time_ms, Color::RESET);
       Serial.printf("Retry amount: %s%d%s\n", Color::BROWN, config.retry_amount, Color::RESET);
    }
 }
@@ -1052,7 +1053,7 @@ inline void NYXUS_WIFI::Load_Exact_SSID_PSWD(std::string_view SSID, std::string_
    while ((xTaskGetTickCount() - start_ticks) < wait_ticks) {
       bits = xEventGroupWaitBits(wifi_event_group, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT, pdTRUE, pdFALSE, 0);
       if ((bits & (WIFI_CONNECTED_BIT | WIFI_FAIL_BIT)) != 0) break;
-      if (!ui_yield_callback) ui_yield_callback();
+      if (ui_yield_callback) ui_yield_callback();
       vTaskDelay(pdMS_TO_TICKS(10));
    }
    return (bits & WIFI_CONNECTED_BIT) != 0;
@@ -1277,11 +1278,11 @@ inline void NYXUS_WIFI::SaveConnectionConfig(std::string_view path){
 inline void NYXUS_WIFI::ResetConnectionConfig(){
    config = ConnectionConfig{
       .connection_wait_time_ms = 200,
-      .ip1 = ESP_IP4TOUINT32(192, 168, 1, 1),
-      .gateway = ESP_IP4TOUINT32(192, 168, 1, 1),
-      .subnet = ESP_IP4TOUINT32(255, 255, 255, 0),
-      .dns1 = ESP_IP4TOUINT32(8, 8, 8, 8),
-      .dns2 = ESP_IP4TOUINT32(8, 8, 4, 4),
+      .ip1 = ESP_IP4TOUINT32(0, 0, 0, 0),
+      .gateway = ESP_IP4TOUINT32(0, 0, 0, 0),
+      .subnet = ESP_IP4TOUINT32(0, 255, 255, 255),
+      .dns1 = ESP_IP4TOUINT32(0, 0, 0, 0),
+      .dns2 = ESP_IP4TOUINT32(0, 0, 0, 0),
       .retry_amount = 5
    };
    if (verbose){
@@ -1380,7 +1381,7 @@ inline void NYXUS_WIFI::StageTarget(const char* ssid, const char* pswd) {
    }
 }
 
-inline void NYXUS_WIFI::HostNetwork(const char* ssid, const char* pswd, uint8_t channel, bool hidden, uint8_t max_connections) {
+inline void NYXUS_WIFI::HostNetwork(const char* ssid, const char* pswd, uint8_t channel, bool hidden, uint8_t max_connections, const ForgedIPConfig& ipconf) {
    wifi_mode_t currentMode;
    esp_wifi_get_mode(&currentMode);
    if (currentMode == WifiMode::off) {
@@ -1389,7 +1390,7 @@ inline void NYXUS_WIFI::HostNetwork(const char* ssid, const char* pswd, uint8_t 
       }
       return;
    }
-   if (currentMode != WifiMode::assertive && currentMode != WifiMode::passive) ChangeMode(WIFI_MODE_AP);
+   if (currentMode != WifiMode::assertive && currentMode != WifiMode::passive) ChangeMode(WifiMode::assertive);
    wifi_config_t ap_config = {};
    strncpy((char*)ap_config.ap.ssid, ssid, sizeof(ap_config.ap.ssid) - 1);
    ap_config.ap.ssid_len = strlen(ssid);
@@ -1402,6 +1403,24 @@ inline void NYXUS_WIFI::HostNetwork(const char* ssid, const char* pswd, uint8_t 
       ap_config.ap.authmode = WIFI_AUTH_WPA2_PSK;
    }
    esp_err_t err = esp_wifi_set_config(WIFI_IF_AP, &ap_config);
+   if (ipconf.ip != 0) {
+      esp_netif_t* ap_netif = esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
+      if (ap_netif != nullptr) {
+         esp_netif_dhcps_stop(ap_netif);
+         esp_netif_ip_info_t info;
+         info.ip.addr = ipconf.ip;
+         info.gw.addr = ipconf.gateway;
+         info.netmask.addr = ipconf.subnet;
+         esp_err_t ip_err = esp_netif_set_ip_info(ap_netif, &info);
+         esp_netif_dhcps_start(ap_netif);
+         if (verbose && ip_err == ESP_OK) {
+            char ip_str[16];
+            esp_ip4addr_ntoa(&info.ip, ip_str, sizeof(ip_str));
+            timestamp();
+            Serial.printf("[%sNETWORK%s] Forged Router IP Applied: %s\n", Color::YELLOW, Color::RESET, ip_str);
+         }
+      }
+   }
    if (verbose) {
       if (err == ESP_OK) {
          timestamp();
