@@ -81,6 +81,16 @@ struct ConnectionConfig{
 };
 
 /**
+* @struct ForgedIPConfig
+* @brief Defines the static IP overrides for the hosting network interface.
+*/
+struct ForgedIPConfig {
+   uint32_t ip       = 0; /**< The spoofed or assigned static IPv4 address presented to the target network. */
+   uint32_t gateway  = 0; /**< The target network's primary gateway router address for outbound traffic.    */
+   uint32_t subnet   = 0; /**< The subnet mask payload to define the local network boundaries.              */
+};
+
+/**
 * @namespace ScanMode
 * @brief Bitmask definitions for network reconnaissance and raw packet injection protocols.
 */
@@ -311,7 +321,7 @@ namespace Extension{
 
 void ipToStr (uint32_t ip, char *buf, size_t bufsz){
    if (bufsz < 16) { if (bufsz>0) buf[0]='\0'; return; }
-   snprintf(buf, bufsz, "%u.%u.%u.%u", (ip >> 24) & 0xFF, (ip >> 16) & 0xFF, (ip >> 8) & 0xFF, ip & 0xFF);
+   snprintf(buf, bufsz, "%u.%u.%u.%u", ip & 0xFF, (ip >> 8) & 0xFF, (ip >> 16) & 0xFF, (ip >> 24) & 0xFF);
 }
 
 constexpr uint16_t MITM::Htons(uint16_t x) { 
