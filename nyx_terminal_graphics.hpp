@@ -81,6 +81,7 @@ namespace Color{
    inline constexpr const char* NVIMGREEN   = "\033[038;002;195;232;141m";
    inline constexpr const char* NVIMBLUE    = "\033[038;002;130;170;255m";
    inline constexpr const char* NVIMPURPLE  = "\033[038;002;192;153;255m";
+   inline constexpr const char* NVIMYELLOW  = "\033[038;002;229;192;123m";
    inline constexpr const char* NVIMDARK    = "\033[038;002;034;036;054m";
 
 
@@ -125,6 +126,7 @@ namespace BgColor{
    inline constexpr const char* NVIMGREEN   = "\033[048;002;195;232;141m";
    inline constexpr const char* NVIMBLUE    = "\033[048;002;130;170;255m";
    inline constexpr const char* NVIMPURPLE  = "\033[048;002;192;153;255m";
+   inline constexpr const char* NVIMYELLOW  = "\033[048;002;229;192;123m";
    inline constexpr const char* NVIMDARK    = "\033[048;002;034;036;054m";
 
 
@@ -168,7 +170,8 @@ class Cursor{
    static inline constexpr const char* RESTOREPOS = "\033[u";                               /**< Snaps the cursor back to the last saved X/Y coordinate.                */
    static inline constexpr const char* HIDE       = "\033[?25l";                            /**< Temporarily vanishes the cursor block to hide redraw stutters.         */
    static inline constexpr const char* SHOW       = "\033[?25h";                            /**< Restores the visible cursor block.                                     */
-   
+   static inline constexpr const char* BLOCK      = "\033[1 q";                             /**< Changes the current visible cursor to a block.                         */
+   static inline constexpr const char* LINE       = "\033[5 q";                             /**< Changes the current visible cursor to a line.                          */
    public:
    /**
     * @brief Core ANSI constructor utilizing a thread-safe circular buffer.
@@ -397,18 +400,14 @@ public:
    return bufs[(idx - 1) & 3];
 }
 
-[[nodiscard]] inline std::pair<uint16_t, uint16_t> Cursor::PARSERSIZE(const char* str){
+[[nodiscard]] inline std::pair<uint16_t, uint16_t> Cursor::PARSERSIZE(const char* str) {
    uint16_t x = 0, y = 0;
-   const char* i = str + 2;
-   for (; *i != ';' && *i != '\0'; i++){
-      x *= 10;
-      x += *i - '0';
-   }
+   const char* i = strchr(str, '[');
+   if (!i) return std::make_pair(0, 0);
+   i++;
+   for (; *i >= '0' && *i <= '9'; i++) x = (x * 10) + (*i - '0');
    if (*i == ';') i++;
-   for (; *i != 'R' && *i != '\0'; i++){
-      y *= 10;
-      y += *i - '0';
-   }
+   for (; *i >= '0' && *i <= '9'; i++) y = (y * 10) + (*i - '0');
    return std::make_pair(y, x);
 }
 
