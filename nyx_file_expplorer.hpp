@@ -30,8 +30,8 @@
 *  SOFTWARE.
 */
 #pragma once
-#ifndef _NEXUS_FILE_EXPLORER_HPP_
-#define _NEXUS_FILE_EXPLORER_HPP_
+#ifndef _NYXUS_FILE_EXPLORER_HPP_
+#define _NYXUS_FILE_EXPLORER_HPP_
 
 #include <cstdint>
 #include <functional>
