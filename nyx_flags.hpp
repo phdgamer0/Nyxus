@@ -1,0 +1,9 @@
+#pragma once
+
+#ifndef _NYXUS_FLAGS_HPP_
+#define _NYXUS_FLAGS_HPP_
+
+#define _NYXUS_ENABLE_EXTERNAL_STORAGE_DEVICE_ 1
+#define _NYXUS_ENABLE_EXTERNAL_RTCLOCK_DEVICE_ 1
+
+#endif
