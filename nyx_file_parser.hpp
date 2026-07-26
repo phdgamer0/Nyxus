@@ -32,8 +32,8 @@
 */
 #pragma once
 
-#ifndef _NEXUS_FILE_PARSER_HPP_
-#define _NEXUS_FILE_PARSER_HPP_
+#ifndef _NYXUS_FILE_PARSER_HPP_
+#define _NYXUS_FILE_PARSER_HPP_
 
 #include <Arduino.h>
 #include <vector>
