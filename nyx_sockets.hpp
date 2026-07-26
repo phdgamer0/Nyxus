@@ -33,8 +33,8 @@
 
 #pragma once
 
-#ifndef _NEXUS_SOCKET_HPP_
-#define _NEXUS_SOCKET_HPP_
+#ifndef _NYXUS_SOCKET_HPP_
+#define _NYXUS_SOCKET_HPP_
 
 #include <array>
 #include <cstdint>
@@ -178,7 +178,7 @@ struct address_t {
 	}
 };
 
-class NEXUS_SOCKET {
+class NYXUS_SOCKET {
 	protected:
 	/**
 	* @brief The address associated with the socket
@@ -220,15 +220,15 @@ class NEXUS_SOCKET {
 
 	public:
 	// Default Constructor
-	NEXUS_SOCKET() : address(), Domain(Domain::UNSPECIFIED), Type(0), Protocol(0), Socket(-1) {};
+	NYXUS_SOCKET() : address(), Domain(Domain::UNSPECIFIED), Type(0), Protocol(0), Socket(-1) {};
 
 	public:
 	// Constructor for explicitly wrapping an existing FD (e.g. from accept)
-	NEXUS_SOCKET(socket_t fd, domain_t d, type_t t, protocol_t p, const address_t& addr) : address(addr), Domain(d), Type(t), Protocol(p), Socket(fd) {};
+	NYXUS_SOCKET(socket_t fd, domain_t d, type_t t, protocol_t p, const address_t& addr) : address(addr), Domain(d), Type(t), Protocol(p), Socket(fd) {};
 	
 	public:
 	// Constructor mapping to standard socket() invocation
-	NEXUS_SOCKET(domain_t d, type_t t, protocol_t p, bool verbose = false) : address(), Domain(d), Type(t), Protocol(p), Socket(-1) {
+	NYXUS_SOCKET(domain_t d, type_t t, protocol_t p, bool verbose = false) : address(), Domain(d), Type(t), Protocol(p), Socket(-1) {
 		if ((Socket = static_cast<socket_t>(lwip_socket(Domain, Type, Protocol))) < 0) {
 			if (verbose) {
 				Serial.printf("[%sERROR%s] Failed To create Socket, reason: %s", Color::RED, Color::RESET, displayErr(errno));
@@ -238,7 +238,7 @@ class NEXUS_SOCKET {
 
 	public:
 	// Destructor - Closes socket to prevent resource leaks
-	~NEXUS_SOCKET() {
+	~NYXUS_SOCKET() {
 		if (Socket >= 0) {
 			lwip_close(Socket);
 			Socket = -1;
@@ -247,13 +247,13 @@ class NEXUS_SOCKET {
 
 	public:
 	// Move Constructor - Transfers ownership of the socket FD
-	NEXUS_SOCKET(NEXUS_SOCKET&& other) noexcept
+	NYXUS_SOCKET(NYXUS_SOCKET&& other) noexcept
 		: address(other.address), Domain(other.Domain), Type(other.Type), Protocol(other.Protocol), Socket(other.Socket) {
 		other.Socket = -1; // Nullify source to prevent double close
 	}
 
 	public:
-	NEXUS_SOCKET& operator=(NEXUS_SOCKET&& other) noexcept {
+	NYXUS_SOCKET& operator=(NYXUS_SOCKET&& other) noexcept {
 		if (this != &other) {
 			if (Socket >= 0) lwip_close(Socket);
 			address = other.address;
@@ -267,10 +267,10 @@ class NEXUS_SOCKET {
 	}
 
 	public:
-	NEXUS_SOCKET(const NEXUS_SOCKET&) = delete;
+	NYXUS_SOCKET(const NYXUS_SOCKET&) = delete;
 	
 	public:
-	NEXUS_SOCKET& operator=(const NEXUS_SOCKET&) = delete;
+	NYXUS_SOCKET& operator=(const NYXUS_SOCKET&) = delete;
 
 	public:
 	/** 
@@ -285,13 +285,13 @@ class NEXUS_SOCKET {
 	public:
 	/** 
 	* @brief Accept a new connection on the socket
-	* @paragraph This function accepts a new connection on the socket and returns a new NEXUS_SOCKET representing the accepted connection.
-	* @return A new NEXUS_SOCKET representing the accepted connection
+	* @paragraph This function accepts a new connection on the socket and returns a new NYXUS_SOCKET representing the accepted connection.
+	* @return A new NYXUS_SOCKET representing the accepted connection
 	*/
-	[[nodiscard]] inline NEXUS_SOCKET accept() const {
+	[[nodiscard]] inline NYXUS_SOCKET accept() const {
 		address_t peer_addr;
 		socket_t new_fd = static_cast<socket_t>(lwip_accept(Socket, peer_addr.raw(), &peer_addr.len));
-		return NEXUS_SOCKET(new_fd, Domain, Type, Protocol, peer_addr);
+		return NYXUS_SOCKET(new_fd, Domain, Type, Protocol, peer_addr);
 	}
 
 	public:
@@ -301,7 +301,7 @@ class NEXUS_SOCKET {
 	* @param local The local address to bind to
 	* @return 0 on success, -1 on failure
 	*/
-	[[nodiscard]] inline int bind(const NEXUS_SOCKET& local) {
+	[[nodiscard]] inline int bind(const NYXUS_SOCKET& local) {
 		address = local.address;
 		return lwip_bind(Socket, address.raw(), address.len);
 	}
@@ -313,7 +313,7 @@ class NEXUS_SOCKET {
 	* @param remote The remote address to connect to
 	* @return 0 on success, -1 on failure
 	*/
-	[[nodiscard]] inline int connect(const NEXUS_SOCKET& remote) {
+	[[nodiscard]] inline int connect(const NYXUS_SOCKET& remote) {
 		address = remote.address;
 		return lwip_connect(Socket, address.raw(), address.len);
 	}
@@ -384,7 +384,7 @@ class NEXUS_SOCKET {
 	* @param peer The peer socket
 	* @return 0 on success, -1 on failure
 	*/
-	[[nodiscard]] inline int getpeername(NEXUS_SOCKET& peer) const {
+	[[nodiscard]] inline int getpeername(NYXUS_SOCKET& peer) const {
 		return lwip_getpeername(Socket, peer.address.raw(), &peer.address.len);
 	}
 
@@ -395,7 +395,7 @@ class NEXUS_SOCKET {
 	* @param local The local socket
 	* @return 0 on success, -1 on failure
 	*/
-	[[nodiscard]] inline int getsockname(NEXUS_SOCKET& local) const {
+	[[nodiscard]] inline int getsockname(NYXUS_SOCKET& local) const {
 		return lwip_getsockname(Socket, local.address.raw(), &local.address.len);
 	}
 
@@ -451,7 +451,7 @@ class NEXUS_SOCKET {
 	* @param flags The send flags
 	* @return The number of bytes sent on success, -1 on failure
 	*/
-	[[nodiscard]] inline ssize_t sendto(const void* data, size_t size, const NEXUS_SOCKET& to, flag_t flags = MessageFlag::NONE) {
+	[[nodiscard]] inline ssize_t sendto(const void* data, size_t size, const NYXUS_SOCKET& to, flag_t flags = MessageFlag::NONE) {
 		return lwip_sendto(Socket, data, size, flags, to.address.raw(), to.address.len);
 	}
 
@@ -490,7 +490,7 @@ class NEXUS_SOCKET {
 	* @param flags The receive flags
 	* @return The number of bytes received on success, -1 on failure
 	*/	
-	[[nodiscard]] inline ssize_t recvfrom(void* buffer, size_t len, NEXUS_SOCKET& from, flag_t flags = MessageFlag::NONE) {
+	[[nodiscard]] inline ssize_t recvfrom(void* buffer, size_t len, NYXUS_SOCKET& from, flag_t flags = MessageFlag::NONE) {
 		return lwip_recvfrom(Socket, buffer, len, flags, from.address.raw(), &from.address.len);
 	}
 
