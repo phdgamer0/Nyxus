@@ -34,12 +34,16 @@
 #ifndef _NYXUS_NETWORK_TYPES_HPP_
 #define _NYXUS_NETWORK_TYPES_HPP_
 
+#include <Nyxus/nyx_flags.hpp>
 #include <esp_wifi_types.h>
 #include <vector>
 #include <string>
 #include <optional>
-#include <SdFat.h>
 #include <cstdint>
+
+#ifdef _NYXUS_ENABLE_EXTERNAL_STORAGE_DEVICE_
+#include <SdFat.h>
+#endif
 
 static inline constexpr uint8_t MAC_SIZE = 0x06;
 
@@ -124,7 +128,9 @@ struct ScanningConfig {
    std::optional<std::string> savePath;   /**< Optional absolute filepath for writing PCAP/log data.                      */
    std::vector<uint16_t> ports;           /**< Vector of target ports (uint16_t allows mapping up to port 65535).         */
    long long timeout;                     /**< Maximum wait time (in milliseconds) for a target to respond.               */
+#ifdef _NYXUS_ENABLE_EXTERNAL_STORAGE_DEVICE_
    SdFat* sd = nullptr;                   /**< Hardware pointer to the filesystem for logging. Nullptr disables disk I/O. */
+#endif
    uint8_t mode;                          /**< Target packet injection type (SYN, UDP, etc.).                             */
    uint8_t speed;                         /**< Timing profile for packet transmission.                                    */
    uint8_t retry;                         /**< Maximum retransmissions before marking a port as filtered/closed.          */

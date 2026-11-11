@@ -34,10 +34,12 @@
 #ifndef _NEXUS_WIFI_HPP_
 #define _NEXUS_WIFI_HPP_
 
+#include <Nyxus/nyx_flags.hpp>
 #include <string_view>
 #include <string>
 #include <cstring>
 #include <cstdint>
+#include <cstdio>
 #include <array>
 #include <vector>
 #include <algorithm>
@@ -52,7 +54,14 @@
 #include <lwip/def.h>
 #include <nvs_flash.h>
 #include <freertos/event_groups.h>
+
+#ifdef _NYXUS_ENABLE_EXTERNAL_RTCLOCK_DEVICE_
 #include <RTClib.h>
+#endif
+
+#ifdef _NYXUS_ENABLE_EXTERNAL_STORAGE_DEVICE_
+#include <SdFat.h>
+#endif
 
 /**
 * @class NYXUS_WIFI
@@ -94,17 +103,21 @@ class NYXUS_WIFI{
     */
    std::vector<TargetDictionary> Targets;
 
+#ifdef _NYXUS_ENABLE_EXTERNAL_RTCLOCK_DEVICE_
    protected:
    /**
    * @brief Pointer to the Real-Time Clock module for accurate telemetry logging.
    */
    RTC_DS3231* rtc_ptr = nullptr;
+#endif
 
+#ifdef _NYXUS_ENABLE_EXTERNAL_STORAGE_DEVICE_
    protected:
    /**
    * @brief Pointer to the SD card.
    */
    SdFat* sd = nullptr;
+#endif
 
    protected:
    /**
@@ -205,10 +218,14 @@ class NYXUS_WIFI{
    * @param scanConfig Optional configuration payload for timing/IP limits. Uses default safety parameters if omitted.
    */
    NYXUS_WIFI(
-      bool toggleVerbosity = true, 
+      bool toggleVerbosity = true,
       bool timestamp = true,
+#ifdef _NYXUS_ENABLE_EXTERNAL_STORAGE_DEVICE_
       SdFat* disk = nullptr,
+#endif
+#ifdef _NYXUS_ENABLE_EXTERNAL_RTCLOCK_DEVICE_
       RTC_DS3231* rtc_module = nullptr,
+#endif
       ConnectionConfig Conconfig = {
          .connection_wait_time_ms = 200,
          .ip1     = ESP_IP4TOUINT32(0, 0, 0, 0),
@@ -217,7 +234,14 @@ class NYXUS_WIFI{
          .dns1    = ESP_IP4TOUINT32(0, 0, 0, 0),
          .dns2    = ESP_IP4TOUINT32(0, 0, 0, 0),
          .retry_amount = 5
-      }): timestampEnabled(timestamp), verbose(toggleVerbosity), config(Conconfig), Targets(), sd(disk), rtc_ptr(rtc_module) {};
+      }): timestampEnabled(timestamp), verbose(toggleVerbosity), config(Conconfig), Targets()
+#ifdef _NYXUS_ENABLE_EXTERNAL_STORAGE_DEVICE_
+         , sd(disk)
+#endif
+#ifdef _NYXUS_ENABLE_EXTERNAL_RTCLOCK_DEVICE_
+         , rtc_ptr(rtc_module)
+#endif
+   {};
 
    private:
    /**
@@ -552,12 +576,13 @@ inline void NYXUS_WIFI::wifi_event_handler(void* arg, esp_event_base_t event_bas
 }
 
 inline void NYXUS_WIFI::display_info(){
+   if (!verbose) return;
    wifi_mode_t currentMode;
    if (esp_wifi_get_mode(&currentMode) != ESP_OK) {
-      if (verbose) { timestamp(); Serial.printf("[%sERROR%s] Failed to fetch current radio mode.\n", Color::RED, Color::RESET); }
+      if (verbose) { timestamp(); printf("[%sERROR%s] Failed to fetch current radio mode.\n", Color::RED, Color::RESET); }
       return;
    }
-   Serial.printf("==========%sWIFI INFO%s==========\n", Color::YELLOW, Color::RESET);
+   printf("==========%sWIFI INFO%s==========\n", Color::YELLOW, Color::RESET);
    uint8_t mac[6];
    char macStr[18];
    switch (currentMode){
@@ -572,18 +597,18 @@ inline void NYXUS_WIFI::display_info(){
          char ipStr[16], gwStr[16];
          esp_ip4addr_ntoa(&ip_info.ip, ipStr, sizeof(ipStr));
          esp_ip4addr_ntoa(&ip_info.gw, gwStr, sizeof(gwStr));
-         Serial.printf("--- %sCLIENT MODE (STA)%s ---\n", Color::TEAL, Color::RESET);
+         printf("--- %sCLIENT MODE (STA)%s ---\n", Color::TEAL, Color::RESET);
          if (err == ESP_OK) {
-            Serial.printf("Connected to SSID: %s%s%s\n", Color::MAGENTA, ap_info.ssid, Color::RESET);
-            timestamp(); Serial.printf("Signal (RSSI): %s%d dBm%s\n", Color::WHITE, ap_info.rssi, Color::RESET);
-            timestamp(); Serial.printf("Channel: %s%d%s\n", Color::BROWN, ap_info.primary, Color::RESET);
-            timestamp(); Serial.printf("Encryption Type: %s%s%s\n", Color::GREEN, translateEncryption(ap_info.authmode), Color::RESET);
+            printf("Connected to SSID: %s%s%s\n", Color::MAGENTA, ap_info.ssid, Color::RESET);
+            timestamp(); printf("Signal (RSSI): %s%d dBm%s\n", Color::WHITE, ap_info.rssi, Color::RESET);
+            timestamp(); printf("Channel: %s%d%s\n", Color::BROWN, ap_info.primary, Color::RESET);
+            timestamp(); printf("Encryption Type: %s%s%s\n", Color::GREEN, translateEncryption(ap_info.authmode), Color::RESET);
          } 
          else {
-            timestamp(); Serial.printf("Status: %sDisconnected / Idle%s\n", Color::RED, Color::RESET);
+            timestamp(); printf("Status: %sDisconnected / Idle%s\n", Color::RED, Color::RESET);
          }
-         timestamp(); Serial.printf("Assigned IPv4: %s%s%s\n", Color::ORANGE, ipStr, Color::RESET);
-         timestamp(); Serial.printf("Hardware MAC: %s%s%s\n", Color::YELLOW, macStr, Color::RESET);
+         timestamp(); printf("Assigned IPv4: %s%s%s\n", Color::ORANGE, ipStr, Color::RESET);
+         timestamp(); printf("Hardware MAC: %s%s%s\n", Color::YELLOW, macStr, Color::RESET);
          if (currentMode != WifiMode::passive) break;
       }
       case WifiMode::assertive: {
@@ -597,64 +622,64 @@ inline void NYXUS_WIFI::display_info(){
          esp_ip4addr_ntoa(&ip_info.ip, ipStr, sizeof(ipStr));
          wifi_sta_list_t sta_list;
          esp_wifi_ap_get_sta_list(&sta_list);
-         Serial.printf("--- %sHOST MODE (AP)%s ---\n", Color::TEAL, Color::RESET);
-         timestamp(); Serial.printf("Broadcasting SSID: %s%s%s\n", Color::MAGENTA, ap_config.ap.ssid, Color::RESET);
-         timestamp(); Serial.printf("Gateway IPv4: %s%s%s\n", Color::ORANGE, ipStr, Color::RESET);
-         timestamp(); Serial.printf("Host MAC: %s%s%s\n", Color::YELLOW, macStr, Color::RESET);
-         timestamp(); Serial.printf("Number of connected devices: %s%d%s\n", Color::GREEN, sta_list.num, Color::RESET);
+         printf("--- %sHOST MODE (AP)%s ---\n", Color::TEAL, Color::RESET);
+         timestamp(); printf("Broadcasting SSID: %s%s%s\n", Color::MAGENTA, ap_config.ap.ssid, Color::RESET);
+         timestamp(); printf("Gateway IPv4: %s%s%s\n", Color::ORANGE, ipStr, Color::RESET);
+         timestamp(); printf("Host MAC: %s%s%s\n", Color::YELLOW, macStr, Color::RESET);
+         timestamp(); printf("Number of connected devices: %s%d%s\n", Color::GREEN, sta_list.num, Color::RESET);
          break;
       }
       case WifiMode::off: {
-         Serial.printf("--- %sOFF MODE%s ---\n", Color::TEAL, Color::RESET);
+         printf("--- %sOFF MODE%s ---\n", Color::TEAL, Color::RESET);
          break;
       }
       default: {
-         timestamp(); Serial.printf("[%sERROR%s] Invalid Mode State encountered.\n", Color::RED, Color::RESET);
+         timestamp(); printf("[%sERROR%s] Invalid Mode State encountered.\n", Color::RED, Color::RESET);
          break;
       }
    }
-   Serial.println("=============================");
+   printf("=============================\n");
 }
 
 inline void NYXUS_WIFI::ChangeMode(const wifi_mode_t &mode){
-   if (verbose) Serial.println("Select the Wifi Mode:");
+   if (verbose) printf("Select the Wifi Mode:\n");
    esp_err_t err = esp_wifi_set_mode(mode);
    if (err != ESP_OK) {
-      if (verbose) { timestamp(); Serial.printf("[%sERROR%s] Failed to change Wi-Fi mode. Code: %d\n", Color::RED, Color::RESET, err); }
+      if (verbose) { timestamp(); printf("[%sERROR%s] Failed to change Wi-Fi mode. Code: %d\n", Color::RED, Color::RESET, err); }
       return;
    }
    switch (mode){
       case WIFI_MODE_STA:{
          if (verbose){
-            timestamp(); Serial.printf("[%sINFO%s] Wifi Mode has been successfully set to Connective (STA).\n", Color::YELLOW, Color::RESET);
-            Serial.println("====== Connection profile ======");
+            timestamp(); printf("[%sINFO%s] Wifi Mode has been successfully set to Connective (STA).\n", Color::YELLOW, Color::RESET);
+            printf("====== Connection profile ======\n");
             displayConfig();
-            Serial.println("================================");
+            printf("================================\n");
          }
          break;
       }
       case WIFI_MODE_AP:{
          if (verbose){
-            timestamp(); Serial.printf("[%sINFO%s] Wifi Mode has been successfully set to Assertive (AP).\n", Color::YELLOW, Color::RESET);
+            timestamp(); printf("[%sINFO%s] Wifi Mode has been successfully set to Assertive (AP).\n", Color::YELLOW, Color::RESET);
          }
          break;
       }
       case WIFI_MODE_APSTA:{
          if (verbose){
-            timestamp(); Serial.printf("[%sINFO%s] Wifi Mode has been successfully set to Passive (APSTA).\n", Color::YELLOW, Color::RESET);
+            timestamp(); printf("[%sINFO%s] Wifi Mode has been successfully set to Passive (APSTA).\n", Color::YELLOW, Color::RESET);
          }
          break;
       }
       case WIFI_MODE_NULL:{
          if (verbose){
-            timestamp(); Serial.printf("[%sINFO%s] Wifi Mode has been successfully set to Off.\n", Color::YELLOW, Color::RESET);
+            timestamp(); printf("[%sINFO%s] Wifi Mode has been successfully set to Off.\n", Color::YELLOW, Color::RESET);
          }
          break;
       }
       default:{
          esp_wifi_set_mode(WIFI_MODE_NULL);   
-         timestamp(); Serial.printf("[%sERROR%s] Invalid Mode payload provided.\n", Color::RED, Color::RESET);
-         timestamp(); Serial.printf("[%sINFO%s] Wifi Turned Off for safety.\n", Color::YELLOW, Color::RESET);   
+         timestamp(); printf("[%sERROR%s] Invalid Mode payload provided.\n", Color::RED, Color::RESET);
+         timestamp(); printf("[%sINFO%s] Wifi Turned Off for safety.\n", Color::YELLOW, Color::RESET);   
          break;
       }   
    }
@@ -667,7 +692,7 @@ inline void NYXUS_WIFI::ChangeMac(uint8_t* new_mac){
    bool isConnected = (bits & WIFI_CONNECTED_BIT) != 0;
    if (isConnected || currentMode == WIFI_MODE_AP || currentMode == WIFI_MODE_APSTA){
       if (verbose) {
-         timestamp(); Serial.printf("[%sERROR%s] Could not Change MAC address due to active connection or hosting profiles.\n", Color::RED, Color::RESET);
+         timestamp(); printf("[%sERROR%s] Could not Change MAC address due to active connection or hosting profiles.\n", Color::RED, Color::RESET);
       }
       return;
    }
@@ -688,10 +713,10 @@ inline void NYXUS_WIFI::ChangeMac(uint8_t* new_mac){
          esp_wifi_get_mac(WIFI_IF_STA, verified_mac);
          char newMacStr[18];
          snprintf(newMacStr, sizeof(newMacStr), "%02X:%02X:%02X:%02X:%02X:%02X", verified_mac[0], verified_mac[1], verified_mac[2], verified_mac[3], verified_mac[4], verified_mac[5]);
-         timestamp(); Serial.printf("[%sWIFI%s] MAC Address spoofed successfully from %s to %s%s%s\n", 
+         timestamp(); printf("[%sWIFI%s] MAC Address spoofed successfully from %s to %s%s%s\n", 
             Color::GREEN, Color::RESET, currMacStr, Color::YELLOW, newMacStr, Color::RESET);
       } else {
-         timestamp(); Serial.printf("[%sERROR%s] Failed to spoof MAC address. Hardware Code: %d\n", Color::RED, Color::RESET, err);
+         timestamp(); printf("[%sERROR%s] Failed to spoof MAC address. Hardware Code: %d\n", Color::RED, Color::RESET, err);
       }
    }
 }
@@ -701,9 +726,11 @@ inline void NYXUS_WIFI::setYieldCallback(void (*callback_func)()) {
 }
 
 inline void NYXUS_WIFI::timestamp(){
-   if (!timestampEnabled) return;
+#ifdef _NYXUS_ENABLE_EXTERNAL_RTCLOCK_DEVICE_
+   if (!timestampEnabled || !rtc_ptr) return;
    DateTime now = rtc_ptr->now();
-   Serial.printf("[%s%d-%d-%d %d:%d:%d%s] ", Color::CYAN, now.year(), now.month(), now.day(), now.hour(), now.minute(), now.second(), Color::RESET);
+   printf("[%s%d-%d-%d %d:%d:%d%s] ", Color::CYAN, now.year(), now.month(), now.day(), now.hour(), now.minute(), now.second(), Color::RESET);
+#endif
 }
 
 inline void NYXUS_WIFI::displayConfig(){
@@ -714,21 +741,23 @@ inline void NYXUS_WIFI::displayConfig(){
       ipToStr(config.subnet, buf_sub, sizeof(buf_sub));
       ipToStr(config.dns1, buf_d1, sizeof(buf_d1));
       ipToStr(config.dns2, buf_d2, sizeof(buf_d2));
-      Serial.printf("IP address: %s%s%s\n", Color::GREEN, buf_ip, Color::RESET);
-      Serial.printf("Gateway: %s%s%s\n", Color::YELLOW, buf_gw, Color::RESET);
-      Serial.printf("Subnet mask: %s%s%s\n", Color::ORANGE, buf_sub, Color::RESET);
-      Serial.printf("DNS primary: %s%s%s\n", Color::MAGENTA, buf_d1, Color::RESET);
-      Serial.printf("DNS secondary: %s%s%s\n", Color::CYAN, buf_d2, Color::RESET);
-      Serial.printf("Wait time: %s%ums%s\n", Color::OLIVE, config.connection_wait_time_ms, Color::RESET);
-      Serial.printf("Retry amount: %s%d%s\n", Color::BROWN, config.retry_amount, Color::RESET);
+      printf("IP address: %s%s%s\n", Color::GREEN, buf_ip, Color::RESET);
+      printf("Gateway: %s%s%s\n", Color::YELLOW, buf_gw, Color::RESET);
+      printf("Subnet mask: %s%s%s\n", Color::ORANGE, buf_sub, Color::RESET);
+      printf("DNS primary: %s%s%s\n", Color::MAGENTA, buf_d1, Color::RESET);
+      printf("DNS secondary: %s%s%s\n", Color::CYAN, buf_d2, Color::RESET);
+      printf("Wait time: %s%ums%s\n", Color::OLIVE, config.connection_wait_time_ms, Color::RESET);
+      printf("Retry amount: %s%d%s\n", Color::BROWN, config.retry_amount, Color::RESET);
    }
 }
 
 inline void NYXUS_WIFI::Kickstart(){
-   if (timestampEnabled){ rtc_ptr->begin(); }
+#ifdef _NYXUS_ENABLE_EXTERNAL_RTCLOCK_DEVICE_
+   if (timestampEnabled && rtc_ptr){ rtc_ptr->begin(); }
+#endif
    if (verbose) {
-      Serial.println("===============================");
-      timestamp(); Serial.printf("[%sWIFI%s] Booting baremetal ESP-IDF networking framework...\n", Color::YELLOW, Color::RESET);
+      printf("===============================\n");
+      timestamp(); printf("[%sWIFI%s] Booting baremetal ESP-IDF networking framework...\n", Color::YELLOW, Color::RESET);
    }
    esp_err_t ret = nvs_flash_init();
    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -743,7 +772,7 @@ inline void NYXUS_WIFI::Kickstart(){
       wifi_event_group = xEventGroupCreate();
       if (wifi_event_group == NULL) {
          if (verbose) {
-            timestamp(); Serial.printf("[%sFATAL%s] FreeRTOS heap exhausted. Event group creation failed.\n", Color::RED, Color::RESET);
+            timestamp(); printf("[%sFATAL%s] FreeRTOS heap exhausted. Event group creation failed.\n", Color::RED, Color::RESET);
          }
          return;
       }
@@ -757,15 +786,15 @@ inline void NYXUS_WIFI::Kickstart(){
    esp_wifi_start();
    esp_wifi_set_ps(WIFI_PS_NONE);
    if (verbose) {
-      timestamp(); Serial.printf("[%sWIFI%s] Hardware interrupts registered. Radio primed.\n", Color::GREEN, Color::RESET);
-      Serial.println("===============================");
+      timestamp(); printf("[%sWIFI%s] Hardware interrupts registered. Radio primed.\n", Color::GREEN, Color::RESET);
+      printf("===============================\n");
    }
 }
 
 inline void NYXUS_WIFI::Kill(bool SavePayloads, bool SaveConnectionConfiguration, const std::string& db_folder_for_ssid_pswd, const std::string& db_folder_for_connection_config){
    if (verbose){
-      Serial.println("===============================");
-      timestamp(); Serial.printf("[%sINFO%s] Killing protocol initiated...\n", Color::YELLOW, Color::RESET);
+      printf("===============================\n");
+      timestamp(); printf("[%sINFO%s] Killing protocol initiated...\n", Color::YELLOW, Color::RESET);
    }
    esp_wifi_disconnect();
    esp_wifi_stop();
@@ -776,31 +805,33 @@ inline void NYXUS_WIFI::Kill(bool SavePayloads, bool SaveConnectionConfiguration
       wifi_mode_t check_mode;
       esp_wifi_get_mode(&check_mode);
       if (check_mode == WifiMode::off){
-         timestamp(); Serial.printf("[%sWIFI%s] Silicon safely released. Hardware off.\n", Color::GREEN, Color::RESET);
+         timestamp(); printf("[%sWIFI%s] Silicon safely released. Hardware off.\n", Color::GREEN, Color::RESET);
       } else {
-         timestamp(); Serial.printf("[%sERROR%s] Fatal: Hardware lockup. Silicon release failed.\n", Color::RED, Color::RESET);
+         timestamp(); printf("[%sERROR%s] Fatal: Hardware lockup. Silicon release failed.\n", Color::RED, Color::RESET);
       }
    }
+#ifdef _NYXUS_ENABLE_EXTERNAL_STORAGE_DEVICE_
    if (SavePayloads && db_folder_for_ssid_pswd != "") DumpSSIDs(db_folder_for_ssid_pswd, true);
    if (SaveConnectionConfiguration && db_folder_for_connection_config != "") SaveConnectionConfig(db_folder_for_connection_config);
+#endif
    if (verbose){
-      timestamp(); Serial.printf("[%sWIFI%s] Erasing SRAM configurations...\n", Color::GREEN, Color::RESET);
+      timestamp(); printf("[%sWIFI%s] Erasing SRAM configurations...\n", Color::GREEN, Color::RESET);
    }
    Targets.clear();
    config = ConnectionConfig();
    if (verbose){
-      timestamp(); Serial.printf("[%sINFO%s] Killing protocol completed.\n", Color::YELLOW, Color::RESET);
-      Serial.println("===============================");
+      timestamp(); printf("[%sINFO%s] Killing protocol completed.\n", Color::YELLOW, Color::RESET);
+      printf("===============================\n");
    }
 }
 
 inline void NYXUS_WIFI::ChangeConnectionConfig(const ConnectionConfig &conf){
    config = conf;
    if (verbose){
-      timestamp(); Serial.printf("[%sINFO%s] changing the connection configuration...\n", Color::YELLOW, Color::RESET);
-      Serial.println("====== Connection profile ======");
+      timestamp(); printf("[%sINFO%s] changing the connection configuration...\n", Color::YELLOW, Color::RESET);
+      printf("====== Connection profile ======\n");
       displayConfig();
-      Serial.println("================================");
+      printf("================================\n");
    }
 }
 
@@ -821,11 +852,11 @@ inline void NYXUS_WIFI::Add_SSID_PSWD(std::string_view SSID, std::string_view PS
    }
    auto it = std::lower_bound(target_dict->payloads.begin(), target_dict->payloads.end(), new_payload);
    if (it != target_dict->payloads.end() && *it == new_payload) {
-      if (verbose) { timestamp(); Serial.printf("[%sINFO%s] Payload already exists!\n", Color::YELLOW, Color::RESET); }
+      if (verbose) { timestamp(); printf("[%sINFO%s] Payload already exists!\n", Color::YELLOW, Color::RESET); }
    }
    else {
       target_dict->payloads.insert(it, new_payload);
-      if (verbose) { timestamp(); Serial.printf("[%sINFO%s] Payload inserted successfully!\n", Color::YELLOW, Color::RESET); }
+      if (verbose) { timestamp(); printf("[%sINFO%s] Payload inserted successfully!\n", Color::YELLOW, Color::RESET); }
    }
 }
 
@@ -838,10 +869,10 @@ inline void NYXUS_WIFI::Remove_SSID_PSWD(std::string_view SSID, std::string_view
          auto it = std::lower_bound(dict.payloads.begin(), dict.payloads.end(), target_payload);
          if (it != dict.payloads.end() && *it == target_payload) {
             dict.payloads.erase(it);
-            if (verbose) { timestamp(); Serial.printf("[%sINFO%s] Payload removed successfully!\n", Color::YELLOW, Color::RESET); }
+            if (verbose) { timestamp(); printf("[%sINFO%s] Payload removed successfully!\n", Color::YELLOW, Color::RESET); }
          }
          else {
-            if (verbose) { timestamp(); Serial.printf("[%sINFO%s] Payload does not exist!\n", Color::YELLOW, Color::RESET); }
+            if (verbose) { timestamp(); printf("[%sINFO%s] Payload does not exist!\n", Color::YELLOW, Color::RESET); }
          }
          return;
       }
@@ -859,26 +890,27 @@ inline void NYXUS_WIFI::Remove_SSID(std::string_view SSID){
    }
    if (verbose){
       if (erased){
-         timestamp(); Serial.printf("[%sINFO%s] SSID removed successfully!\n", Color::YELLOW, Color::RESET); 
+         timestamp(); printf("[%sINFO%s] SSID removed successfully!\n", Color::YELLOW, Color::RESET); 
       }
       else{
-         timestamp(); Serial.printf("[%sINFO%s] SSID does not exist!\n", Color::YELLOW, Color::RESET);
+         timestamp(); printf("[%sINFO%s] SSID does not exist!\n", Color::YELLOW, Color::RESET);
       }
    }
 }
 
+#ifdef _NYXUS_ENABLE_EXTERNAL_STORAGE_DEVICE_
 inline void NYXUS_WIFI::LoadSSID(std::string_view SSID, std::string_view db_folder, bool showAtteptPswd, uint64_t limit) {
    if (!sd){
-      if (verbose) { timestamp(); Serial.printf("[%sERROR%s] no mount detected\n", Color::RED, Color::RESET); }
+      if (verbose) { timestamp(); printf("[%sERROR%s] no mount detected\n", Color::RED, Color::RESET); }
       return;
    }
    std::string filepath = std::string(db_folder) + "/" + std::string(SSID) + ".ssidpswd";
    if (!sd->exists(filepath.c_str())) {
-      if (verbose) { timestamp(); Serial.printf("[%sERROR%s] Database %s%s%s does not exist!\n", Color::RED, Color::RESET, Color::YELLOW, filepath.c_str(), Color::RESET); }
+      if (verbose) { timestamp(); printf("[%sERROR%s] Database %s%s%s does not exist!\n", Color::RED, Color::RESET, Color::YELLOW, filepath.c_str(), Color::RESET); }
       return;
    }
    if (verbose) {
-      timestamp(); Serial.printf("[%sINFO%s] Extracting payloads directly from %s...\n", Color::YELLOW, Color::RESET, filepath.c_str());
+      timestamp(); printf("[%sINFO%s] Extracting payloads directly from %s...\n", Color::YELLOW, Color::RESET, filepath.c_str());
    }
    size_t initialSize = 0;
    for (const auto& dict : Targets) {
@@ -907,13 +939,13 @@ inline void NYXUS_WIFI::LoadSSID(std::string_view SSID, std::string_view db_fold
          }
       }
       size_t loaded = finalSize - initialSize;
-      timestamp(); Serial.printf("[%sSUCCESS%s] %zu target payloads injected into SRAM.\n", Color::GREEN, Color::RESET, loaded);
+      timestamp(); printf("[%sSUCCESS%s] %zu target payloads injected into SRAM.\n", Color::GREEN, Color::RESET, loaded);
    }
 }
 
 inline void NYXUS_WIFI::DumpSSID(std::string_view SSID, std::string_view db_folder, bool safeDump, uint64_t limit) {
    if (!sd){
-      if (verbose) { timestamp(); Serial.printf("[%sERROR%s] no mount detected\n", Color::RED, Color::RESET); }
+      if (verbose) { timestamp(); printf("[%sERROR%s] no mount detected\n", Color::RED, Color::RESET); }
       return;
    }
    TargetDictionary* target_dict = nullptr;
@@ -926,7 +958,7 @@ inline void NYXUS_WIFI::DumpSSID(std::string_view SSID, std::string_view db_fold
    if (!target_dict) return;
    std::string filepath = std::string(db_folder) + "/" + std::string(SSID) + Extension::ssidpswd;
    if (verbose) { 
-      timestamp(); Serial.printf("[%sINFO%s] Serializing target: %.*s\n", Color::YELLOW, Color::RESET, static_cast<int>(SSID.length()), SSID.data());
+      timestamp(); printf("[%sINFO%s] Serializing target: %.*s\n", Color::YELLOW, Color::RESET, static_cast<int>(SSID.length()), SSID.data());
    }
    std::vector<bool> write_mask(target_dict->payloads.size(), true);
    if (safeDump && sd->exists(filepath.c_str())) {
@@ -950,7 +982,7 @@ inline void NYXUS_WIFI::DumpSSID(std::string_view SSID, std::string_view db_fold
    }
    FsFile writeFile = sd->open(filepath.c_str(), (safeDump ? (O_WRITE | O_CREAT | O_AT_END) : (O_WRITE | O_CREAT | O_TRUNC)));
    if (!writeFile) {
-      if (verbose) { timestamp(); Serial.printf("[%sERROR%s] I/O failure on file: %s\n", Color::RED, Color::RESET, filepath.c_str()); }
+      if (verbose) { timestamp(); printf("[%sERROR%s] I/O failure on file: %s\n", Color::RED, Color::RESET, filepath.c_str()); }
       return;
    }
    for (size_t i = 0; i < target_dict->payloads.size(); i++) {
@@ -966,7 +998,7 @@ inline void NYXUS_WIFI::DumpSSID(std::string_view SSID, std::string_view db_fold
 inline void NYXUS_WIFI::Dump_Exact_SSID_PSWD(std::string_view SSID, std::string_view PSWD, std::string_view db_folder, bool safeDump) {
    if (!sd){
       if (verbose) {
-         timestamp(); Serial.printf("[%sERROR%s] no mount detected\n", Color::RED, Color::RESET);
+         timestamp(); printf("[%sERROR%s] no mount detected\n", Color::RED, Color::RESET);
       }
       return;
    }
@@ -979,7 +1011,7 @@ inline void NYXUS_WIFI::Dump_Exact_SSID_PSWD(std::string_view SSID, std::string_
             line[strcspn(line, "\r\n")] = 0;
             if (std::string_view(line) == PSWD) {
                if (verbose) {
-                  timestamp(); Serial.printf("[%sINFO%s] Exact payload already exists in %s\n", Color::YELLOW, Color::RESET, filepath.c_str());
+                  timestamp(); printf("[%sINFO%s] Exact payload already exists in %s\n", Color::YELLOW, Color::RESET, filepath.c_str());
                }
                readFile.close();
                return;
@@ -993,7 +1025,7 @@ inline void NYXUS_WIFI::Dump_Exact_SSID_PSWD(std::string_view SSID, std::string_
       writeFile.printf("%.*s\n", static_cast<int>(PSWD.length()), PSWD.data());
       writeFile.close();
       if (verbose) {
-         timestamp(); Serial.printf("[%sSUCCESS%s] Exact payload appended to %s\n", Color::GREEN, Color::RESET, filepath.c_str());
+         timestamp(); printf("[%sSUCCESS%s] Exact payload appended to %s\n", Color::GREEN, Color::RESET, filepath.c_str());
       }
    }
 }
@@ -1001,7 +1033,7 @@ inline void NYXUS_WIFI::Dump_Exact_SSID_PSWD(std::string_view SSID, std::string_
 inline void NYXUS_WIFI::Load_Exact_SSID_PSWD(std::string_view SSID, std::string_view PSWD, std::string_view db_folder) {
    if (!sd){
       if (verbose) {
-         timestamp(); Serial.printf("[%sERROR%s] no mount detected\n", Color::RED, Color::RESET);
+         timestamp(); printf("[%sERROR%s] no mount detected\n", Color::RED, Color::RESET);
       }
       return;
    }
@@ -1019,6 +1051,7 @@ inline void NYXUS_WIFI::Load_Exact_SSID_PSWD(std::string_view SSID, std::string_
    }
    file.close();
 }
+#endif /* _NYXUS_ENABLE_EXTERNAL_STORAGE_DEVICE_ */
 
 [[nodiscard]] inline bool NYXUS_WIFI::execute_hardware_handshake(std::string_view ssid, std::string_view pswd) {
    xEventGroupClearBits(wifi_event_group, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT);
@@ -1061,15 +1094,15 @@ inline void NYXUS_WIFI::Load_Exact_SSID_PSWD(std::string_view SSID, std::string_
 
 inline void NYXUS_WIFI::Connect(bool showAtteptPswd){
    if (Targets.empty()){
-      if (verbose){ timestamp(); Serial.printf("[%sERROR%s] No SSID available to connect to.\n", Color::RED, Color::RESET); }
+      if (verbose){ timestamp(); printf("[%sERROR%s] No SSID available to connect to.\n", Color::RED, Color::RESET); }
       return;
    }
    esp_wifi_set_mode(WIFI_MODE_STA);
    for (const auto &target : Targets){
-      if (verbose){ timestamp(); Serial.printf("[%sWIFI%s] Attempting to connect to %s%s%s\n", Color::GREEN, Color::RESET, Color::MAGENTA, target.ssid.data(), Color::RESET); }
+      if (verbose){ timestamp(); printf("[%sWIFI%s] Attempting to connect to %s%s%s\n", Color::GREEN, Color::RESET, Color::MAGENTA, target.ssid.data(), Color::RESET); }
       for (const auto &PSWD : target.payloads){
          if (verbose && showAtteptPswd){
-            timestamp(); Serial.printf("[%sWIFI%s] Attempting to connect to %s%s%s with password %s%s%s\n", Color::GREEN, Color::RESET, Color::MAGENTA, target.ssid.data(), Color::RESET, Color::YELLOW, PSWD.data(), Color::RESET);
+            timestamp(); printf("[%sWIFI%s] Attempting to connect to %s%s%s with password %s%s%s\n", Color::GREEN, Color::RESET, Color::MAGENTA, target.ssid.data(), Color::RESET, Color::YELLOW, PSWD.data(), Color::RESET);
          }
          if (execute_hardware_handshake(target.ssid.data(), PSWD.data())) {
             if (verbose) display_info();
@@ -1082,14 +1115,14 @@ inline void NYXUS_WIFI::Connect(bool showAtteptPswd){
 inline void NYXUS_WIFI::Connect(std::string_view SSID, std::string_view PSWD, bool showAtteptPswd, bool save){
    esp_wifi_set_mode(WIFI_MODE_STA);
    if (verbose && showAtteptPswd){
-      timestamp(); Serial.printf("[%sWIFI%s] Targeted injection on %s%.*s%s with payload %s%.*s%s\n", Color::GREEN, Color::RESET, Color::MAGENTA, static_cast<int>(SSID.length()), SSID.data(), Color::RESET, Color::YELLOW, static_cast<int>(PSWD.length()), PSWD.data(), Color::RESET);
+      timestamp(); printf("[%sWIFI%s] Targeted injection on %s%.*s%s with payload %s%.*s%s\n", Color::GREEN, Color::RESET, Color::MAGENTA, static_cast<int>(SSID.length()), SSID.data(), Color::RESET, Color::YELLOW, static_cast<int>(PSWD.length()), PSWD.data(), Color::RESET);
    }
    if (execute_hardware_handshake(SSID.data(), PSWD.data())) {
       if (verbose) display_info();
       if (save) Add_SSID_PSWD(SSID, PSWD);
    }
    else {
-      if (verbose){ timestamp(); Serial.printf("[%sFAILED%s] Authentication rejected.\n", Color::RED, Color::RESET); }
+      if (verbose){ timestamp(); printf("[%sFAILED%s] Authentication rejected.\n", Color::RED, Color::RESET); }
    }
 }
 
@@ -1102,35 +1135,36 @@ inline void NYXUS_WIFI::Connect(std::string_view SSID, bool showAtteptPswd){
       }
    }
    if (!target_dict){
-      if (verbose){ timestamp(); Serial.printf("[%sERROR%s] Target SSID is NOT registered in the payload dictionary.\n", Color::RED, Color::RESET); }
+      if (verbose){ timestamp(); printf("[%sERROR%s] Target SSID is NOT registered in the payload dictionary.\n", Color::RED, Color::RESET); }
       return;
    }
    esp_wifi_set_mode(WIFI_MODE_STA);
    for (const auto &PSWD : target_dict->payloads){
       if (verbose && showAtteptPswd){
-         timestamp(); Serial.printf("[%sWIFI%s] Injecting payload %s%s%s into %s%s%s\n", Color::GREEN, Color::RESET, Color::YELLOW, PSWD.data(), Color::RESET, Color::MAGENTA, target_dict->ssid.data(), Color::RESET);
+         timestamp(); printf("[%sWIFI%s] Injecting payload %s%s%s into %s%s%s\n", Color::GREEN, Color::RESET, Color::YELLOW, PSWD.data(), Color::RESET, Color::MAGENTA, target_dict->ssid.data(), Color::RESET);
       }
       if (execute_hardware_handshake(target_dict->ssid.data(), PSWD.data())) {
          if (verbose) display_info();
          return;
       }
    }
-   if (verbose){ timestamp(); Serial.printf("[%sFAILED%s] Dictionary exhausted. Target remains secure.\n", Color::RED, Color::RESET); }
+   if (verbose){ timestamp(); printf("[%sFAILED%s] Dictionary exhausted. Target remains secure.\n", Color::RED, Color::RESET); }
 }
 
+#ifdef _NYXUS_ENABLE_EXTERNAL_STORAGE_DEVICE_
 inline void NYXUS_WIFI::Connect(std::string_view SSID, std::string_view db_folder, bool showAtteptPswd) {
    if (!sd){
-      if (verbose) { timestamp(); Serial.printf("[%sERROR%s] No mount detected.\n", Color::RED, Color::RESET); }
+      if (verbose) { timestamp(); printf("[%sERROR%s] No mount detected.\n", Color::RED, Color::RESET); }
       return;
    }
    std::string filepath = std::string(db_folder) + "/" + std::string(SSID) + ".ssidpswd";
    FsFile file = sd->open(filepath.c_str(), O_READ);
    if (!file) {
-      if (verbose) { timestamp(); Serial.printf("[%sERROR%s] No payload database found for target: %.*s\n", Color::RED, Color::RESET, static_cast<int>(SSID.length()), SSID.data()); }
+      if (verbose) { timestamp(); printf("[%sERROR%s] No payload database found for target: %.*s\n", Color::RED, Color::RESET, static_cast<int>(SSID.length()), SSID.data()); }
       return;
    }
    if (verbose) {
-      timestamp(); Serial.printf("[%sINFO%s] Database hit! Commencing streaming attack on %s%.*s%s...\n", Color::YELLOW, Color::RESET, Color::MAGENTA, static_cast<int>(SSID.length()), SSID.data(), Color::RESET);
+      timestamp(); printf("[%sINFO%s] Database hit! Commencing streaming attack on %s%.*s%s...\n", Color::YELLOW, Color::RESET, Color::MAGENTA, static_cast<int>(SSID.length()), SSID.data(), Color::RESET);
    }
    esp_wifi_set_mode(WIFI_MODE_STA);
    char payloadBuffer[64];
@@ -1138,12 +1172,12 @@ inline void NYXUS_WIFI::Connect(std::string_view SSID, std::string_view db_folde
       payloadBuffer[strcspn(payloadBuffer, "\r\n")] = 0;
       if (payloadBuffer[0] == '\0') continue;
       if (verbose && showAtteptPswd) {
-         timestamp(); Serial.printf("[%sWIFI%s] Streaming payload: %s%s%s\n", Color::GREEN, Color::RESET, Color::YELLOW, payloadBuffer, Color::RESET);
+         timestamp(); printf("[%sWIFI%s] Streaming payload: %s%s%s\n", Color::GREEN, Color::RESET, Color::YELLOW, payloadBuffer, Color::RESET);
       }
       if (execute_hardware_handshake(SSID.data(), payloadBuffer)) {
          if (verbose) {
-            Serial.println();
-            timestamp(); Serial.printf("[%sCRITICAL SUCCESS%s] Target Breached. Payload verified: %s%s%s\n", Color::GREEN, Color::RESET, Color::YELLOW, payloadBuffer, Color::RESET);
+            printf("\n");
+            timestamp(); printf("[%sCRITICAL SUCCESS%s] Target Breached. Payload verified: %s%s%s\n", Color::GREEN, Color::RESET, Color::YELLOW, payloadBuffer, Color::RESET);
             display_info();
          }
          file.close();
@@ -1151,24 +1185,24 @@ inline void NYXUS_WIFI::Connect(std::string_view SSID, std::string_view db_folde
       }
    }
    file.close();
-   if (verbose) { timestamp(); Serial.printf("[%sFAILED%s] Payload database exhausted. Target %.*s remains secure.\n", Color::RED, Color::RESET, static_cast<int>(SSID.length()), SSID.data()); }
+   if (verbose) { timestamp(); printf("[%sFAILED%s] Payload database exhausted. Target %.*s remains secure.\n", Color::RED, Color::RESET, static_cast<int>(SSID.length()), SSID.data()); }
 }
 
 inline void NYXUS_WIFI::DumpSSIDs(std::string_view db_folder, bool safeDump){
    if (!sd){
-      if (verbose) { timestamp(); Serial.printf("[%sERROR%s] no mount detected\n", Color::RED, Color::RESET); }
+      if (verbose) { timestamp(); printf("[%sERROR%s] no mount detected\n", Color::RED, Color::RESET); }
       return;
    }
    size_t fileCreated = 0;
    size_t fileWritten = 0;
    if (verbose){
-      Serial.println("===============================");
-      timestamp();Serial.printf("[%sINFO%s] Commencing payload serialization sequence...\n", Color::YELLOW, Color::RESET);
+      printf("===============================\n");
+      timestamp();printf("[%sINFO%s] Commencing payload serialization sequence...\n", Color::YELLOW, Color::RESET);
    }
    NyxPayload search_payload;
    for (const auto &target : Targets){
       if (verbose) {
-         timestamp(); Serial.printf("[%sINFO%s] Processing target matrix: %s\n", Color::YELLOW, Color::RESET, target.ssid.data());
+         timestamp(); printf("[%sINFO%s] Processing target matrix: %s\n", Color::YELLOW, Color::RESET, target.ssid.data());
       }
       std::string filepath = std::string(db_folder) + "/" + target.ssid.data() + Extension::ssidpswd;
       if (safeDump){
@@ -1195,7 +1229,7 @@ inline void NYXUS_WIFI::DumpSSIDs(std::string_view db_folder, bool safeDump){
          }
          FsFile writeFile = sd->open(filepath.c_str(), O_WRITE | O_CREAT | O_AT_END);
          if (!writeFile){
-            if (verbose) { timestamp();Serial.printf("[%sERROR%s] I/O failure on file: %s\n", Color::RED, Color::RESET, filepath.c_str()); }
+            if (verbose) { timestamp();printf("[%sERROR%s] I/O failure on file: %s\n", Color::RED, Color::RESET, filepath.c_str()); }
             continue;
          }
          for (size_t i = 0; i < target.payloads.size(); i++) {
@@ -1210,7 +1244,7 @@ inline void NYXUS_WIFI::DumpSSIDs(std::string_view db_folder, bool safeDump){
          if (!sd->exists(filepath.c_str())) fileCreated++;
          FsFile file = sd->open(filepath.c_str(), O_WRITE | O_CREAT | O_TRUNC);
          if (!file){
-            if (verbose){ timestamp(); Serial.printf("[%sERROR%s] Could not create file: %s\n", Color::RED, Color::RESET, filepath.c_str()); }
+            if (verbose){ timestamp(); printf("[%sERROR%s] Could not create file: %s\n", Color::RED, Color::RESET, filepath.c_str()); }
             continue;
          }
          for (const auto &PSWD : target.payloads){
@@ -1221,39 +1255,39 @@ inline void NYXUS_WIFI::DumpSSIDs(std::string_view db_folder, bool safeDump){
       }
    }
    if (verbose){
-      timestamp(); Serial.printf("[%sSUCCESS%s] Serialization complete.\n", Color::GREEN, Color::RESET);
-      timestamp(); Serial.printf("[%sSTAT%s] Targets Created: %zu\tPayloads Written: %zu\n", Color::CYAN, Color::RESET, fileCreated, fileWritten);
-      Serial.println("===============================");
+      timestamp(); printf("[%sSUCCESS%s] Serialization complete.\n", Color::GREEN, Color::RESET);
+      timestamp(); printf("[%sSTAT%s] Targets Created: %zu\tPayloads Written: %zu\n", Color::CYAN, Color::RESET, fileCreated, fileWritten);
+      printf("===============================\n");
    }
 }
 
 inline void NYXUS_WIFI::LoadConnectionConfig(std::string_view path){
    if (!sd){
-      if (verbose) { timestamp(); Serial.printf("[%sERROR%s] No mount detected.\n", Color::RED, Color::RESET); }
+      if (verbose) { timestamp(); printf("[%sERROR%s] No mount detected.\n", Color::RED, Color::RESET); }
       return;
    }
    std::string safe_path(path);
    if (!sd->exists(safe_path.c_str())){
-      if (verbose) { timestamp(); Serial.printf("[%sERROR%s] %s%.*s%s does not exist!\n", Color::RED, Color::RESET, Color::YELLOW, static_cast<int>(path.length()), path.data(), Color::RESET ); }
+      if (verbose) { timestamp(); printf("[%sERROR%s] %s%.*s%s does not exist!\n", Color::RED, Color::RESET, Color::YELLOW, static_cast<int>(path.length()), path.data(), Color::RESET ); }
       return;
    }
-   if (verbose) { timestamp(); Serial.printf("[%sINFO%s] Delegating %.*s to NYXUS_FILE_PARSER...\n", Color::YELLOW, Color::RESET, static_cast<int>(path.length()), path.data()); }
+   if (verbose) { timestamp(); printf("[%sINFO%s] Delegating %.*s to NYXUS_FILE_PARSER...\n", Color::YELLOW, Color::RESET, static_cast<int>(path.length()), path.data()); }
    NYXUS_FILE_PARSER::Parse(sd, safe_path, &config);
    if (verbose) {
-      timestamp(); Serial.printf("[%sSUCCESS%s] Connection configuration injected into SRAM.\n", Color::GREEN, Color::RESET);
+      timestamp(); printf("[%sSUCCESS%s] Connection configuration injected into SRAM.\n", Color::GREEN, Color::RESET);
       displayConfig(); 
    }
 }
 
 inline void NYXUS_WIFI::SaveConnectionConfig(std::string_view path){
    if (!sd){
-      if (verbose) { timestamp(); Serial.printf("[%sERROR%s] No mount detected.\n", Color::RED, Color::RESET); }
+      if (verbose) { timestamp(); printf("[%sERROR%s] No mount detected.\n", Color::RED, Color::RESET); }
       return;
    }
    std::string safe_path(path);
    FsFile file = sd->open(safe_path.c_str(), O_WRITE | O_CREAT | O_TRUNC);
    if (!file){
-      if (verbose){ timestamp(); Serial.printf("[%sERROR%s] I/O failure on file: %.*s\n", Color::RED, Color::RESET, static_cast<int>(path.length()), path.data()); }
+      if (verbose){ timestamp(); printf("[%sERROR%s] I/O failure on file: %.*s\n", Color::RED, Color::RESET, static_cast<int>(path.length()), path.data()); }
       return;
    }
    char buf_ip[16], buf_gt[16], buf_sub[16], buf_d1[16], buf_d2[16];
@@ -1271,9 +1305,10 @@ inline void NYXUS_WIFI::SaveConnectionConfig(std::string_view path){
    file.printf("-r %d\n", config.retry_amount);
    file.close();
    if (verbose){
-      timestamp(); Serial.printf("[%sSUCCESS%s] Connection configuration serialized to %.*s\n", Color::GREEN, Color::RESET, static_cast<int>(path.length()), path.data());
+      timestamp(); printf("[%sSUCCESS%s] Connection configuration serialized to %.*s\n", Color::GREEN, Color::RESET, static_cast<int>(path.length()), path.data());
    }
 }
+#endif /* _NYXUS_ENABLE_EXTERNAL_STORAGE_DEVICE_ */
 
 inline void NYXUS_WIFI::ResetConnectionConfig(){
    config = ConnectionConfig{
@@ -1286,25 +1321,26 @@ inline void NYXUS_WIFI::ResetConnectionConfig(){
       .retry_amount = 5
    };
    if (verbose){
-      timestamp(); Serial.printf("[%sINFO%s] Connection configuration restored to factory baseline.\n", Color::YELLOW, Color::RESET);
+      timestamp(); printf("[%sINFO%s] Connection configuration restored to factory baseline.\n", Color::YELLOW, Color::RESET);
    }
 }
 
+#ifdef _NYXUS_ENABLE_EXTERNAL_STORAGE_DEVICE_
 inline void NYXUS_WIFI::Remove_Exact_SSID_PSWD_From_SD(std::string_view SSID, std::string_view PSWD, std::string_view db_folder) {
    if (!sd) {
-      if (verbose) { timestamp(); Serial.printf("[%sERROR%s] No mount detected.\n", Color::RED, Color::RESET); }
+      if (verbose) { timestamp(); printf("[%sERROR%s] No mount detected.\n", Color::RED, Color::RESET); }
       return;
    }
    std::string filepath = std::string(db_folder) + "/" + std::string(SSID) + Extension::ssidpswd;
    std::string temppath = std::string(db_folder) + "/" + std::string(SSID) + ".tmp";
    if (!sd->exists(filepath.c_str())) {
-      if (verbose) { timestamp(); Serial.printf("[%sERROR%s] Database %s does not exist.\n", Color::RED, Color::RESET, filepath.c_str()); }
+      if (verbose) { timestamp(); printf("[%sERROR%s] Database %s does not exist.\n", Color::RED, Color::RESET, filepath.c_str()); }
       return;
    }
    FsFile readFile = sd->open(filepath.c_str(), O_READ);
    FsFile writeFile = sd->open(temppath.c_str(), O_WRITE | O_CREAT | O_TRUNC);
    if (!readFile || !writeFile) {
-      if (verbose) { timestamp(); Serial.printf("[%sERROR%s] I/O Lockup during file swap.\n", Color::RED, Color::RESET); }
+      if (verbose) { timestamp(); printf("[%sERROR%s] I/O Lockup during file swap.\n", Color::RED, Color::RESET); }
       return;
    }
    bool found = false;
@@ -1323,42 +1359,43 @@ inline void NYXUS_WIFI::Remove_Exact_SSID_PSWD_From_SD(std::string_view SSID, st
    if (found) {
       sd->remove(filepath.c_str());
       sd->rename(temppath.c_str(), filepath.c_str());
-      if (verbose) { timestamp(); Serial.printf("[%sSUCCESS%s] Payload surgically excised from SD: %s\n", Color::GREEN, Color::RESET, filepath.c_str()); }
+      if (verbose) { timestamp(); printf("[%sSUCCESS%s] Payload surgically excised from SD: %s\n", Color::GREEN, Color::RESET, filepath.c_str()); }
    } else {
       sd->remove(temppath.c_str());
-      if (verbose) { timestamp(); Serial.printf("[%sINFO%s] Payload not found in SD database.\n", Color::YELLOW, Color::RESET); }
+      if (verbose) { timestamp(); printf("[%sINFO%s] Payload not found in SD database.\n", Color::YELLOW, Color::RESET); }
    }
 }
 
 inline void NYXUS_WIFI::DestroyFile(std::string_view filepath) {
    if (!sd) {
-      if (verbose) { timestamp(); Serial.printf("[%sERROR%s] No mount detected.\n", Color::RED, Color::RESET); }
+      if (verbose) { timestamp(); printf("[%sERROR%s] No mount detected.\n", Color::RED, Color::RESET); }
       return;
    }
    if (sd->exists(filepath.data())) {
       if (sd->remove(filepath.data())) {
-         if (verbose) { timestamp(); Serial.printf("[%sSUCCESS%s] File obliterated from disk: %.*s\n", Color::GREEN, Color::RESET, static_cast<int>(filepath.length()), filepath.data()); }
+         if (verbose) { timestamp(); printf("[%sSUCCESS%s] File obliterated from disk: %.*s\n", Color::GREEN, Color::RESET, static_cast<int>(filepath.length()), filepath.data()); }
       }
       else {
-         if (verbose) { timestamp(); Serial.printf("[%sERROR%s] SPI Bus lock prevented deletion of: %.*s\n", Color::RED, Color::RESET, static_cast<int>(filepath.length()), filepath.data()); }
+         if (verbose) { timestamp(); printf("[%sERROR%s] SPI Bus lock prevented deletion of: %.*s\n", Color::RED, Color::RESET, static_cast<int>(filepath.length()), filepath.data()); }
       }
    }
    else {
-      if (verbose) { timestamp(); Serial.printf("[%sINFO%s] Target file does not exist: %.*s\n", Color::YELLOW, Color::RESET, static_cast<int>(filepath.length()), filepath.data()); }
+      if (verbose) { timestamp(); printf("[%sINFO%s] Target file does not exist: %.*s\n", Color::YELLOW, Color::RESET, static_cast<int>(filepath.length()), filepath.data()); }
    }
 }
 
 inline void NYXUS_WIFI::Delete_SSID_Database(std::string_view SSID, std::string_view db_folder) {
    std::string filepath = std::string(db_folder) + "/" + std::string(SSID) + Extension::ssidpswd;
-   if (verbose) { timestamp(); Serial.printf("[%sINFO%s] Initiating deletion of payload database: %s\n", Color::RED, Color::RESET, filepath.c_str()); }
+   if (verbose) { timestamp(); printf("[%sINFO%s] Initiating deletion of payload database: %s\n", Color::RED, Color::RESET, filepath.c_str()); }
    DestroyFile(filepath);
 }
 
 inline void NYXUS_WIFI::Delete_ConnectionConfig(std::string_view path) {
    std::string filepath = std::string(path) + Extension::connconf;
-   if (verbose) { timestamp(); Serial.printf("[%sINFO%s] Initiating deletion of connection config: %s\n", Color::RED, Color::RESET, filepath.c_str()); }
+   if (verbose) { timestamp(); printf("[%sINFO%s] Initiating deletion of connection config: %s\n", Color::RED, Color::RESET, filepath.c_str()); }
    DestroyFile(filepath);
 }
+#endif /* _NYXUS_ENABLE_EXTERNAL_STORAGE_DEVICE_ */
 
 inline void NYXUS_WIFI::StageTarget(const char* ssid, const char* pswd) {
    wifi_config_t wifi_cfg = {};
@@ -1372,11 +1409,11 @@ inline void NYXUS_WIFI::StageTarget(const char* ssid, const char* pswd) {
    if (verbose) {
       if (err == ESP_OK) {
          timestamp();
-         Serial.printf("[%sWIFI%s] Target credentials staged for %s%s%s. Ready for execution.\n", Color::GREEN, Color::RESET, Color::MAGENTA, ssid, Color::RESET);
+         printf("[%sWIFI%s] Target credentials staged for %s%s%s. Ready for execution.\n", Color::GREEN, Color::RESET, Color::MAGENTA, ssid, Color::RESET);
       }
       else {
          timestamp();
-         Serial.printf("[%sERROR%s] Failed to stage target registers. Code: %d\n", Color::RED, Color::RESET, err);
+         printf("[%sERROR%s] Failed to stage target registers. Code: %d\n", Color::RED, Color::RESET, err);
       }
    }
 }
@@ -1386,7 +1423,7 @@ inline void NYXUS_WIFI::HostNetwork(const char* ssid, const char* pswd, uint8_t 
    esp_wifi_get_mode(&currentMode);
    if (currentMode == WifiMode::off) {
       if (verbose){
-         timestamp(); Serial.printf("[%sERROR%s] Wifi is off.\n", Color::RED, Color::RESET);
+         timestamp(); printf("[%sERROR%s] Wifi is off.\n", Color::RED, Color::RESET);
       }
       return;
    }
@@ -1417,18 +1454,18 @@ inline void NYXUS_WIFI::HostNetwork(const char* ssid, const char* pswd, uint8_t 
             char ip_str[16];
             esp_ip4addr_ntoa(&info.ip, ip_str, sizeof(ip_str));
             timestamp();
-            Serial.printf("[%sNETWORK%s] Forged Router IP Applied: %s\n", Color::YELLOW, Color::RESET, ip_str);
+            printf("[%sNETWORK%s] Forged Router IP Applied: %s\n", Color::YELLOW, Color::RESET, ip_str);
          }
       }
    }
    if (verbose) {
       if (err == ESP_OK) {
          timestamp();
-         Serial.printf("[%sWIFI%s] Access Point Broadcasting: %s%s%s (Ch: %d)\n", Color::GREEN, Color::RESET, Color::MAGENTA, ssid, Color::RESET, channel);
+         printf("[%sWIFI%s] Access Point Broadcasting: %s%s%s (Ch: %d)\n", Color::GREEN, Color::RESET, Color::MAGENTA, ssid, Color::RESET, channel);
       }
       else {
          timestamp();
-         Serial.printf("[%sERROR%s] Failed to configure Access Point. Code: %d\n", Color::RED, Color::RESET, err);
+         printf("[%sERROR%s] Failed to configure Access Point. Code: %d\n", Color::RED, Color::RESET, err);
       }
    }
 }

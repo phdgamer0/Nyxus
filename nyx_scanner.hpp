@@ -33,7 +33,9 @@
 #pragma once
 #ifndef _NYXUS_SCANNER_HPP_
 #define _NYXUS_SCANNER_HPP_
+#include <Nyxus/nyx_flags.hpp>
 #include <string.h>
+#include <cstdio>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <freertos/queue.h>
@@ -41,6 +43,7 @@
 #include <esp_wifi.h>
 #include <esp_timer.h>
 #include <esp_event.h>
+#include <esp_random.h>
 #include <nvs_flash.h>
 #include <lwip/sockets.h>
 #include <lwip/dns.h>
@@ -48,8 +51,14 @@
 #include <Nyxus/nyx_file_parser.hpp>
 #include <Nyxus/nyx_terminal_graphics.hpp>
 #include <algorithm>
+
+#ifdef _NYXUS_ENABLE_EXTERNAL_RTCLOCK_DEVICE_
 #include <RTClib.h>
+#endif
+
+#ifdef _NYXUS_ENABLE_EXTERNAL_STORAGE_DEVICE_
 #include <SdFat.h>
+#endif
 
 inline constexpr uint32_t init_delay_time = 100;
 /**
@@ -74,11 +83,13 @@ class NYXUS_SCANNER{
    */
    ScanningConfig scanConfig;
 
+#ifdef _NYXUS_ENABLE_EXTERNAL_STORAGE_DEVICE_
    private:
-   /** 
+   /**
    * @brief The active PCAP database file
    */
    FsFile sniffer_file;
+#endif
 
    private:
    /** 
@@ -98,17 +109,21 @@ class NYXUS_SCANNER{
    */
    void  (*ui_yield_callback)() = nullptr;
 
+#ifdef _NYXUS_ENABLE_EXTERNAL_STORAGE_DEVICE_
    protected:
    /**
    * @brief Pointer to the SD card.
    */
    SdFat* sd = nullptr;
+#endif
 
+#ifdef _NYXUS_ENABLE_EXTERNAL_RTCLOCK_DEVICE_
    protected:
    /**
    * @brief Pointer to the Real Time Clock.
    */
    RTC_DS3231* rtc = nullptr;
+#endif
 
    private:
    /**
@@ -237,7 +252,26 @@ class NYXUS_SCANNER{
    * @param timestamp Enables timestamping on files.
    * @param scanConfig Optional configuration payload for timing/IP limits. Uses default safety parameters if omitted.
    */
-   NYXUS_SCANNER(bool toggleVerbosity = true, bool timestamp = true, SdFat* disk = nullptr, RTC_DS3231* rtc = nullptr, const ScanningConfig &scanConfig = {.savePath = std::nullopt, .ports = {}, .timeout = 1000,  .sd = nullptr, .mode = ScanMode::NONE, .speed = ScanSpeed::MEDIUM, .retry = 0, .verbose = false, .timestampEnabled = false}): timestampEnabled(timestamp), verbose(toggleVerbosity), scanConfig(scanConfig), sd(disk), rtc(rtc) {
+   NYXUS_SCANNER(bool toggleVerbosity = true, bool timestamp = true
+#ifdef _NYXUS_ENABLE_EXTERNAL_STORAGE_DEVICE_
+                 , SdFat* disk = nullptr
+#endif
+#ifdef _NYXUS_ENABLE_EXTERNAL_RTCLOCK_DEVICE_
+                 , RTC_DS3231* rtc = nullptr
+#endif
+                 , const ScanningConfig &scanConfig = {.savePath = std::nullopt, .ports = {}, .timeout = 1000,
+#ifdef _NYXUS_ENABLE_EXTERNAL_STORAGE_DEVICE_
+                 .sd = nullptr,
+#endif
+                 .mode = ScanMode::NONE, .speed = ScanSpeed::MEDIUM, .retry = 0, .verbose = false, .timestampEnabled = false})
+                 : timestampEnabled(timestamp), verbose(toggleVerbosity), scanConfig(scanConfig)
+#ifdef _NYXUS_ENABLE_EXTERNAL_STORAGE_DEVICE_
+                 , sd(disk)
+#endif
+#ifdef _NYXUS_ENABLE_EXTERNAL_RTCLOCK_DEVICE_
+                 , rtc(rtc)
+#endif
+   {
 
    };
 
@@ -285,6 +319,7 @@ class NYXUS_SCANNER{
     */
    inline void  Scan(const std::string& target_ip, const ScanningConfig& conf, bool save_result = false, const std::string& save_path = "");
 
+#ifdef _NYXUS_ENABLE_EXTERNAL_STORAGE_DEVICE_
    public:
    /**
     * @brief Loads a `.scnconf` profile directly from the SD card and executes the sweep.
@@ -295,6 +330,7 @@ class NYXUS_SCANNER{
     * @return void
     */
    inline void  Scan(const std::string& target_ip, const std::string& path, bool save_result = false, const std::string& save_path = "");
+#endif
 
    private:
    /**
@@ -303,16 +339,18 @@ class NYXUS_SCANNER{
    */
    inline void timestamp();
 
+#ifdef _NYXUS_ENABLE_EXTERNAL_STORAGE_DEVICE_
    private:
    /**
     * @brief Background FreeRTOS thread dedicated exclusively to writing 8KB chunks to the SD card.
     * @param arg Void pointer cast back to the scanner instance.
     * @paragraph The Poison Pill
-    * This task sleeps completely (0% CPU usage) using `portMAX_DELAY` until the Interceptor sends a message 
-    * through the queue. If it receives a message with `length == 0`, that acts as a "Poison Pill", forcing 
+    * This task sleeps completely (0% CPU usage) using `portMAX_DELAY` until the Interceptor sends a message
+    * through the queue. If it receives a message with `length == 0`, that acts as a "Poison Pill", forcing
     * the task to gracefully terminate itself when the user stops the sniffer.
     */
    static void sniffer_writer_task(void* arg);
+#endif
 
    /**
     * @brief High-speed hardware callback triggered on every raw 802.11 frame captured by the antenna.
@@ -325,6 +363,7 @@ class NYXUS_SCANNER{
     */
    static void promiscuous_rx_cb(void *buf, wifi_promiscuous_pkt_type_t type);
 
+#ifdef _NYXUS_ENABLE_EXTERNAL_STORAGE_DEVICE_
    public:
    /**
     * @brief Ignites the Promiscuous Mode radio filter and spawns the background logging tasks.
@@ -339,6 +378,7 @@ class NYXUS_SCANNER{
     * @return void
     */
    inline void  StopSniffing();
+#endif
 
    public:
    /**
@@ -352,6 +392,7 @@ class NYXUS_SCANNER{
     */
    inline void  SetChannel(uint8_t channel);
    
+#ifdef _NYXUS_ENABLE_EXTERNAL_STORAGE_DEVICE_
    public:
    /**
    * @brief Loads the scanning configuration file via the hardware parser.
@@ -360,7 +401,7 @@ class NYXUS_SCANNER{
    * @attention The file extension MUST be `.scnconf`.
    */
    inline void  LoadScanConfig(const std::string& path);
-   
+
    public:
    /**
    * @brief Serializes the active Scanning Configuration Profile from SRAM to persistent FAT32 storage.
@@ -368,6 +409,7 @@ class NYXUS_SCANNER{
    * @return void
    */
    inline void  SaveScanConfig(const std::string& path);
+#endif
 
    public:
    /**
@@ -384,6 +426,7 @@ class NYXUS_SCANNER{
    */
    inline void  ChangeScanConfig(const ScanningConfig &conf);
 
+#ifdef _NYXUS_ENABLE_EXTERNAL_STORAGE_DEVICE_
    public:
    /**
    * @brief Permanently deletes a specific scanning configuration file from the SD card.
@@ -391,7 +434,7 @@ class NYXUS_SCANNER{
    * @return void
    */
    inline void  Delete_ScanConfig(const std::string &path);
-   
+
    private:
    /**
    * @brief Internal hardware method to destroy a file on the FAT32 volume.
@@ -399,9 +442,10 @@ class NYXUS_SCANNER{
    * @return void
    */
    inline void  DestroyFile(const std::string& filepath);
+#endif
 
    public:
-   /** 
+   /**
    * @brief Registers the UI rendering function to be called during wait states.
    * @param callback_func pointer to the callback_func
    */
@@ -442,20 +486,20 @@ class NYXUS_SCANNER{
 
 inline void NYXUS_SCANNER::KickStart() {
    if (verbose) {
-      Serial.println("===============================");
-      timestamp(); Serial.printf("[%sSCANNER%s] Verifying hardware state for raw socket injection...\n", Color::YELLOW, Color::RESET);
+      printf("===============================\n");
+      timestamp(); printf("[%sSCANNER%s] Verifying hardware state for raw socket injection...\n", Color::YELLOW, Color::RESET);
    }
    wifi_mode_t current_mode;
    esp_err_t err = esp_wifi_get_mode(&current_mode);
    if (err == ESP_OK && current_mode != WifiMode::off) {
       if (verbose) {
-         timestamp(); Serial.printf("[%sINFO%s] Active radio session detected. Piggybacking on existing LwIP stack...\n", Color::GREEN, Color::RESET);
+         timestamp(); printf("[%sINFO%s] Active radio session detected. Piggybacking on existing LwIP stack...\n", Color::GREEN, Color::RESET);
       }
       esp_wifi_set_ps(WIFI_PS_NONE); 
    }
    else {
       if (verbose) {
-         timestamp(); Serial.printf("[%sWARNING%s] Radio is offline or uninitialized. Booting standalone LwIP framework...\n", Color::ORANGE, Color::RESET);
+         timestamp(); printf("[%sWARNING%s] Radio is offline or uninitialized. Booting standalone LwIP framework...\n", Color::ORANGE, Color::RESET);
       }
       esp_err_t ret = nvs_flash_init();
       if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -473,20 +517,20 @@ inline void NYXUS_SCANNER::KickStart() {
       esp_wifi_set_ps(WIFI_PS_NONE);
    }
    if (verbose) {
-      timestamp(); Serial.printf("[%sSUCCESS%s] Scanner engine online. Raw sockets unlocked.\n", Color::GREEN, Color::RESET);
-      Serial.println("===============================");
+      timestamp(); printf("[%sSUCCESS%s] Scanner engine online. Raw sockets unlocked.\n", Color::GREEN, Color::RESET);
+      printf("===============================\n");
    }
 }
 
 inline void NYXUS_SCANNER::ExecuteSweep(const std::string& target_ip, bool save_result, const std::string& save_path) {
    bool scan_all = (std::find(scanConfig.ports.begin(), scanConfig.ports.end(), 0) != scanConfig.ports.end());
    if (scanConfig.ports.empty() && !scan_all) {
-      if (verbose) { timestamp(); Serial.printf("[%sERROR%s] No ports defined in configuration.\n", Color::RED, Color::RESET); }
+      if (verbose) { timestamp(); printf("[%sERROR%s] No ports defined in configuration.\n", Color::RED, Color::RESET); }
       return;
    }
    uint32_t src_ip = get_local_ipv4();
    if (src_ip == 0) {
-      if (verbose) { timestamp(); Serial.printf("[%sERROR%s] Radio not assigned an IPv4. Cannot craft return headers.\n", Color::RED, Color::RESET); }
+      if (verbose) { timestamp(); printf("[%sERROR%s] Radio not assigned an IPv4. Cannot craft return headers.\n", Color::RED, Color::RESET); }
       return;
    }
    struct sockaddr_in dest_addr;
@@ -498,13 +542,13 @@ inline void NYXUS_SCANNER::ExecuteSweep(const std::string& target_ip, bool save_
    if (use_tcp) tcp_sock = socket(AF_INET, SOCK_RAW, IPPROTO_TCP);
    if (use_udp) udp_sock = socket(AF_INET, SOCK_RAW, IPPROTO_UDP);
    if (tcp_sock < 0 && udp_sock < 0) {
-      if (verbose) { timestamp(); Serial.printf("[%sERROR%s] Failed to allocate any raw sockets. Code: %d\n", Color::RED, Color::RESET, errno); }
+      if (verbose) { timestamp(); printf("[%sERROR%s] Failed to allocate any raw sockets. Code: %d\n", Color::RED, Color::RESET, errno); }
       return;
    }
    uint32_t hardware_delay_ms = 255 - scanConfig.speed; 
    uint32_t total_ports = scan_all ? 65535 : scanConfig.ports.size();
    if (verbose) {
-      timestamp(); Serial.printf("[%sSCANNER%s] Initiating concurrent asynchronous sweep against %s%s%s...\n", Color::MAGENTA, Color::RESET, Color::YELLOW, target_ip.c_str(), Color::RESET);
+      timestamp(); printf("[%sSCANNER%s] Initiating concurrent asynchronous sweep against %s%s%s...\n", Color::MAGENTA, Color::RESET, Color::YELLOW, target_ip.c_str(), Color::RESET);
    }
    struct PortState {
       uint16_t port;
@@ -517,7 +561,7 @@ inline void NYXUS_SCANNER::ExecuteSweep(const std::string& target_ip, bool save_
       uint16_t port = scan_all ? static_cast<uint16_t>(i + 1) : scanConfig.ports[i];
       if (port != 0) target_states.push_back({port, "NO RESPONSE", false});
    }
-   uint16_t dynamic_src_port = (uint16_t)random(10000, 60000);
+   uint16_t dynamic_src_port = (uint16_t)(10000 + (esp_random() % (60000 - 10000)));
    for (auto& target : target_states) {
       for (uint8_t attempt = 0; attempt <= scanConfig.retry; attempt++) {
          if (use_tcp && tcp_sock >= 0) {
@@ -526,7 +570,7 @@ inline void NYXUS_SCANNER::ExecuteSweep(const std::string& target_ip, bool save_
             tcp_header* tcph = (tcp_header*) (datagram + sizeof(pseudo_header));
             tcph->source_port = htons(dynamic_src_port);
             tcph->dest_port   = htons(target.port);
-            tcph->sequence    = htonl(random(1000, 999999));
+            tcph->sequence    = htonl(1000 + (esp_random() % (999999 - 1000)));
             tcph->data_offset = (5 << 4);
             tcph->window      = htons(1024);
             if (scanConfig.mode & ScanMode::SYN)     tcph->flags |= 0x02;
@@ -551,11 +595,11 @@ inline void NYXUS_SCANNER::ExecuteSweep(const std::string& target_ip, bool save_
       if (ui_yield_callback) ui_yield_callback();
       if (hardware_delay_ms > 0) vTaskDelay(pdMS_TO_TICKS(hardware_delay_ms)); 
    }
-   unsigned long start_time = millis();
+   int64_t start_time = esp_timer_get_time() / 1000;
    char recv_buf[128];
    struct sockaddr_in source_addr;
    socklen_t socklen = sizeof(source_addr);
-   while (millis() - start_time < scanConfig.timeout) {
+   while ((esp_timer_get_time() / 1000) - start_time < scanConfig.timeout) {
       if (use_tcp && tcp_sock >= 0) {
          int len = recvfrom(tcp_sock, recv_buf, sizeof(recv_buf), MSG_DONTWAIT, (struct sockaddr*)&source_addr, &socklen);
          if (len > 0) {
@@ -589,23 +633,29 @@ inline void NYXUS_SCANNER::ExecuteSweep(const std::string& target_ip, bool save_
       if (ui_yield_callback) ui_yield_callback();
       vTaskDelay(pdMS_TO_TICKS(5));
    }
+#ifdef _NYXUS_ENABLE_EXTERNAL_STORAGE_DEVICE_
    FsFile logFile;
    if (save_result && save_path != "" && sd) {
       logFile = sd->open(save_path.c_str(), O_WRITE | O_CREAT | O_AT_END);
       if (logFile) logFile.printf("\n--- TARGET: %s ---\n", target_ip.c_str());
    }
+#endif
    for (const auto& target : target_states) {
       if (verbose && (target.responded || !scan_all)) {
          const char* color = (target.forensic_result.find("OPEN") != std::string::npos) ? Color::GREEN : Color::RED;
-         timestamp(); Serial.printf("[%s%s%s] Port %d\n", color, target.forensic_result.c_str(), Color::RESET, target.port);
+         timestamp(); printf("[%s%s%s] Port %d\n", color, target.forensic_result.c_str(), Color::RESET, target.port);
       }
+#ifdef _NYXUS_ENABLE_EXTERNAL_STORAGE_DEVICE_
       if (logFile && (target.responded || !scan_all)) logFile.printf("Port %d: %s\n", target.port, target.forensic_result.c_str());
+#endif
    }
+#ifdef _NYXUS_ENABLE_EXTERNAL_STORAGE_DEVICE_
    if (logFile) logFile.close();
-   if (tcp_sock >= 0) close(tcp_sock); 
-   if (udp_sock >= 0) close(udp_sock); 
+#endif
+   if (tcp_sock >= 0) close(tcp_sock);
+   if (udp_sock >= 0) close(udp_sock);
    if (verbose) {
-      timestamp(); Serial.println("===============================");
+      timestamp(); printf("===============================\n");
    }
 }
 
@@ -618,17 +668,22 @@ inline void NYXUS_SCANNER::Scan(const std::string& target_ip, const ScanningConf
    ExecuteSweep(target_ip, save_result, save_path);
 }
 
+#ifdef _NYXUS_ENABLE_EXTERNAL_STORAGE_DEVICE_
 inline void NYXUS_SCANNER::Scan(const std::string& target_ip, const std::string& path, bool save_result, const std::string& save_path){
    LoadScanConfig(path);
    ExecuteSweep(target_ip, save_result, save_path);
 }
+#endif
 
 inline void NYXUS_SCANNER::timestamp(){
-   if (!timestampEnabled) return;
+#ifdef _NYXUS_ENABLE_EXTERNAL_RTCLOCK_DEVICE_
+   if (!timestampEnabled || !rtc) return;
    DateTime now = rtc->now();
-   Serial.printf("[%s%d-%d-%d %d:%d:%d%s] ", Color::CYAN, now.year(), now.month(), now.day(), now.hour(), now.minute(), now.second(), Color::RESET);
+   printf("[%s%d-%d-%d %d:%d:%d%s] ", Color::CYAN, now.year(), now.month(), now.day(), now.hour(), now.minute(), now.second(), Color::RESET);
+#endif
 }
 
+#ifdef _NYXUS_ENABLE_EXTERNAL_STORAGE_DEVICE_
 inline void NYXUS_SCANNER::sniffer_writer_task(void* arg) {
    NYXUS_SCANNER* instance = static_cast<NYXUS_SCANNER*>(arg);
    SnifferFlushMsg msg;
@@ -642,6 +697,7 @@ inline void NYXUS_SCANNER::sniffer_writer_task(void* arg) {
    }
    vTaskDelete(NULL);
 }
+#endif
 
 inline void NYXUS_SCANNER::promiscuous_rx_cb(void *buf, wifi_promiscuous_pkt_type_t type) {
    if (!active_sniffer_instance || !active_sniffer_instance->is_sniffing) return;
@@ -670,33 +726,34 @@ inline void NYXUS_SCANNER::promiscuous_rx_cb(void *buf, wifi_promiscuous_pkt_typ
    active_sniffer_instance->active_rx_offset += len;
 }
 
+#ifdef _NYXUS_ENABLE_EXTERNAL_STORAGE_DEVICE_
 inline void NYXUS_SCANNER::StartSniffing(const std::string& save_path) {
    if (is_sniffing) return;
    if (active_sniffer_instance != nullptr && active_sniffer_instance != this) {
       if (verbose) {
          timestamp();
-         Serial.printf("[%sFATAL%s] Another scanner instance is already holding the radio lock!\n", Color::RED, Color::RESET);
+         printf("[%sFATAL%s] Another scanner instance is already holding the radio lock!\n", Color::RED, Color::RESET);
       }
       return;
    }
    if (!sniffer_buffer_A) sniffer_buffer_A = (uint8_t*)heap_caps_malloc(SNIFFER_BUFFER_SIZE, MALLOC_CAP_SPIRAM);
    if (!sniffer_buffer_B) sniffer_buffer_B = (uint8_t*)heap_caps_malloc(SNIFFER_BUFFER_SIZE, MALLOC_CAP_SPIRAM);
    if (!sniffer_buffer_A || !sniffer_buffer_B) {
-      if (verbose) { timestamp(); Serial.printf("[%sFATAL%s] SRAM Heap exhausted. Cannot allocate sniffer buffers.\n", Color::RED, Color::RESET); }
+      if (verbose) { timestamp(); printf("[%sFATAL%s] SRAM Heap exhausted. Cannot allocate sniffer buffers.\n", Color::RED, Color::RESET); }
       return;
    }
    if (!sd) {
-      if (verbose) { timestamp(); Serial.printf("[%sERROR%s] No SD mount detected for PCAP storage.\n", Color::RED, Color::RESET); }
+      if (verbose) { timestamp(); printf("[%sERROR%s] No SD mount detected for PCAP storage.\n", Color::RED, Color::RESET); }
       return;
    }
    sniffer_file = sd->open(save_path.c_str(), O_WRITE | O_CREAT | O_TRUNC);
    if (!sniffer_file) {
-      if (verbose) { timestamp(); Serial.printf("[%sERROR%s] Failed to create PCAP database.\n", Color::RED, Color::RESET); }
+      if (verbose) { timestamp(); printf("[%sERROR%s] Failed to create PCAP database.\n", Color::RED, Color::RESET); }
       return;
    }
    if (verbose) {
-      Serial.println("===============================");
-      timestamp(); Serial.printf("[%sSNIFFER%s] Injecting global PCAP cryptographic headers...\n", Color::YELLOW, Color::RESET);
+      printf("===============================\n");
+      timestamp(); printf("[%sSNIFFER%s] Injecting global PCAP cryptographic headers...\n", Color::YELLOW, Color::RESET);
    }
    sniffer_file.write((const uint8_t*)&PCAP::Standard80211, sizeof(PCAP::GlobalHeader));
    sniffer_flush_queue = xQueueCreate(4, sizeof(SnifferFlushMsg)); // Can hold 4 buffers in backlog
@@ -709,7 +766,7 @@ inline void NYXUS_SCANNER::StartSniffing(const std::string& save_path) {
    esp_wifi_set_promiscuous_filter(&filter);
    esp_wifi_set_promiscuous_rx_cb(&promiscuous_rx_cb);
    esp_wifi_set_promiscuous(true);
-   if (verbose) { timestamp(); Serial.printf("[%sSUCCESS%s] Promiscuous Mode Armed. Vacuuming packets.\n", Color::GREEN, Color::RESET); }
+   if (verbose) { timestamp(); printf("[%sSUCCESS%s] Promiscuous Mode Armed. Vacuuming packets.\n", Color::GREEN, Color::RESET); }
 }
 
 inline void NYXUS_SCANNER::StopSniffing() {
@@ -724,43 +781,45 @@ inline void NYXUS_SCANNER::StopSniffing() {
    }
    SnifferFlushMsg poison_pill = { nullptr, 0 };
    xQueueSend(sniffer_flush_queue, &poison_pill, portMAX_DELAY);
-   delay(init_delay_time);
+   vTaskDelay(pdMS_TO_TICKS(init_delay_time));
    vQueueDelete(sniffer_flush_queue);
    if (sniffer_file) sniffer_file.close();
    if (sniffer_buffer_A) { heap_caps_free(sniffer_buffer_A); sniffer_buffer_A = nullptr; }
    if (sniffer_buffer_B) { heap_caps_free(sniffer_buffer_B); sniffer_buffer_B = nullptr; }
-   if (verbose) { 
-      timestamp(); Serial.printf("[%sSUCCESS%s] Sniffer disarmed. PCAP file finalized.\n", Color::GREEN, Color::RESET); 
-      Serial.println("===============================");
+   if (verbose) {
+      timestamp(); printf("[%sSUCCESS%s] Sniffer disarmed. PCAP file finalized.\n", Color::GREEN, Color::RESET);
+      printf("===============================\n");
    }
 }
+#endif /* _NYXUS_ENABLE_EXTERNAL_STORAGE_DEVICE_ */
 
 inline void NYXUS_SCANNER::SetChannel(uint8_t channel) {
    if (channel >= 1 && channel <= 13) {
       esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE);
-      if (verbose) { timestamp(); Serial.printf("[%sINFO%s] Radio hopped to Channel %d\n", Color::CYAN, Color::RESET, channel); }
+      if (verbose) { timestamp(); printf("[%sINFO%s] Radio hopped to Channel %d\n", Color::CYAN, Color::RESET, channel); }
    }
 }
 
+#ifdef _NYXUS_ENABLE_EXTERNAL_STORAGE_DEVICE_
 inline void NYXUS_SCANNER::LoadScanConfig(const std::string& path){
    if (!sd){
       if (verbose) {
-         timestamp(); Serial.printf("[%sERROR%s] no mount detected\n", Color::RED, Color::RESET);
+         timestamp(); printf("[%sERROR%s] no mount detected\n", Color::RED, Color::RESET);
       }
       return;
    }
    if (!sd->exists(path.c_str())){
       if (verbose) {
-         timestamp(); Serial.printf("[%sERROR%s] %s%s%s does not exist!\n", Color::RED, Color::RESET, Color::YELLOW, path.c_str(), Color::RESET );
+         timestamp(); printf("[%sERROR%s] %s%s%s does not exist!\n", Color::RED, Color::RESET, Color::YELLOW, path.c_str(), Color::RESET );
       }
       return;
    }
    if (verbose) {
-      timestamp(); Serial.printf("[%sINFO%s] Delegating %s to NYXUS_FILE_PARSER...\n", Color::YELLOW, Color::RESET, path.c_str());
+      timestamp(); printf("[%sINFO%s] Delegating %s to NYXUS_FILE_PARSER...\n", Color::YELLOW, Color::RESET, path.c_str());
    }
    NYXUS_FILE_PARSER::Parse(sd, path, &scanConfig);
    if (verbose) {
-      timestamp(); Serial.printf("[%sSUCCESS%s] Scanning configuration injected into SRAM.\n", Color::GREEN, Color::RESET);
+      timestamp(); printf("[%sSUCCESS%s] Scanning configuration injected into SRAM.\n", Color::GREEN, Color::RESET);
       //displayScanConfig();
       // Optional: You could call a  here to verify the parsed parameters
    }
@@ -768,14 +827,14 @@ inline void NYXUS_SCANNER::LoadScanConfig(const std::string& path){
 
 inline void NYXUS_SCANNER::SaveScanConfig(const std::string& path){
    if (!sd){
-      if (verbose) { timestamp(); Serial.printf("[%sERROR%s] No mount detected.\n", Color::RED, Color::RESET); }
+      if (verbose) { timestamp(); printf("[%sERROR%s] No mount detected.\n", Color::RED, Color::RESET); }
       return;
    }
    std::string filepath = path + Extension::scnconf;
    FsFile file = sd->open(filepath.c_str(), O_WRITE | O_CREAT | O_TRUNC);
    if (!file){
       if (verbose){
-         timestamp(); Serial.printf("[%sERROR%s] I/O failure on file: %s\n", Color::RED, Color::RESET, filepath.c_str());
+         timestamp(); printf("[%sERROR%s] I/O failure on file: %s\n", Color::RED, Color::RESET, filepath.c_str());
       }
       return;
    }
@@ -791,16 +850,19 @@ inline void NYXUS_SCANNER::SaveScanConfig(const std::string& path){
    }
    file.close();
    if (verbose){
-      timestamp(); Serial.printf("[%sSUCCESS%s] Scan configuration serialized to %s\n", Color::GREEN, Color::RESET, filepath.c_str());
+      timestamp(); printf("[%sSUCCESS%s] Scan configuration serialized to %s\n", Color::GREEN, Color::RESET, filepath.c_str());
    }
 }
+#endif /* _NYXUS_ENABLE_EXTERNAL_STORAGE_DEVICE_ */
 
 inline void NYXUS_SCANNER::ResetScanConfig(){
    scanConfig = ScanningConfig{
       .savePath = std::nullopt,
       .ports = {},
       .timeout = 1000,
+#ifdef _NYXUS_ENABLE_EXTERNAL_STORAGE_DEVICE_
       .sd = nullptr,
+#endif
       .mode = ScanMode::NONE,
       .speed = ScanSpeed::MEDIUM,
       .retry = 0,
@@ -808,38 +870,40 @@ inline void NYXUS_SCANNER::ResetScanConfig(){
       .timestampEnabled = false
    };
    if (verbose){
-      timestamp(); Serial.printf("[%sINFO%s] Scanning configuration restored to factory baseline.\n", Color::YELLOW, Color::RESET);
+      timestamp(); printf("[%sINFO%s] Scanning configuration restored to factory baseline.\n", Color::YELLOW, Color::RESET);
    }
 }
 
 inline void NYXUS_SCANNER::ChangeScanConfig(const ScanningConfig &conf){
    scanConfig = conf;
    if (verbose){
-      timestamp(); Serial.printf("[%sINFO%s] Scanning configuration manually updated in SRAM.\n", Color::YELLOW, Color::RESET);
+      timestamp(); printf("[%sINFO%s] Scanning configuration manually updated in SRAM.\n", Color::YELLOW, Color::RESET);
    }
 }
 
+#ifdef _NYXUS_ENABLE_EXTERNAL_STORAGE_DEVICE_
 inline void NYXUS_SCANNER::Delete_ScanConfig(const std::string &path) {
    std::string filepath = path + Extension::scnconf;
-   if (verbose) { timestamp(); Serial.printf("[%sINFO%s] Initiating deletion of scan config: %s\n", Color::RED, Color::RESET, filepath.c_str()); }
+   if (verbose) { timestamp(); printf("[%sINFO%s] Initiating deletion of scan config: %s\n", Color::RED, Color::RESET, filepath.c_str()); }
    DestroyFile(filepath);
 }
 
 inline void NYXUS_SCANNER::DestroyFile(const std::string& filepath) {
    if (!sd) {
-      if (verbose) { timestamp(); Serial.printf("[%sERROR%s] No mount detected.\n", Color::RED, Color::RESET); }
+      if (verbose) { timestamp(); printf("[%sERROR%s] No mount detected.\n", Color::RED, Color::RESET); }
       return;
    }
    if (sd->exists(filepath.c_str())) {
       if (sd->remove(filepath.c_str())) {
-         if (verbose) { timestamp(); Serial.printf("[%sSUCCESS%s] File obliterated from disk: %s\n", Color::GREEN, Color::RESET, filepath.c_str()); }
+         if (verbose) { timestamp(); printf("[%sSUCCESS%s] File obliterated from disk: %s\n", Color::GREEN, Color::RESET, filepath.c_str()); }
       } else {
-         if (verbose) { timestamp(); Serial.printf("[%sERROR%s] SPI Bus lock prevented deletion of: %s\n", Color::RED, Color::RESET, filepath.c_str()); }
+         if (verbose) { timestamp(); printf("[%sERROR%s] SPI Bus lock prevented deletion of: %s\n", Color::RED, Color::RESET, filepath.c_str()); }
       }
    } else {
-      if (verbose) { timestamp(); Serial.printf("[%sINFO%s] Target file does not exist: %s\n", Color::YELLOW, Color::RESET, filepath.c_str()); }
+      if (verbose) { timestamp(); printf("[%sINFO%s] Target file does not exist: %s\n", Color::YELLOW, Color::RESET, filepath.c_str()); }
    }
 }
+#endif /* _NYXUS_ENABLE_EXTERNAL_STORAGE_DEVICE_ */
 
 inline void NYXUS_SCANNER::setYieldCallback(void (*callback_func)()) {
    ui_yield_callback = callback_func;

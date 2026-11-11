@@ -34,15 +34,20 @@
 #ifndef _NYXUS_MITM_HPP_
 #define _NYXUS_MITM_HPP_
 
-#include <Arduino.h>
+#include <Nyxus/nyx_flags.hpp>
 #include <esp_wifi.h>
 #include <lwip/inet.h>
 #include <lwip/sockets.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include <cstdio>
+#include <cstring>
 #include <Nyxus/nyx_terminal_graphics.hpp>
 #include <Nyxus/nyx_network_types.hpp>
+
+#ifdef _NYXUS_ENABLE_EXTERNAL_RTCLOCK_DEVICE_
 #include <RTClib.h>
+#endif
 
 // The Undocumented ESP-IDF C-Bridge: Allows injecting raw Ethernet frames directly into the hardware encryption pipeline
 extern "C" esp_err_t esp_wifi_internal_tx(wifi_interface_t wifi_if, void *buffer, uint16_t len);
@@ -60,14 +65,16 @@ class NYXUS_MITM {
    */
    TaskHandle_t dns_task_handle = nullptr;
 
+#ifdef _NYXUS_ENABLE_EXTERNAL_RTCLOCK_DEVICE_
    private:
    /**
    * @brief Pointer to the global real time clock if available
    */
    RTC_DS3231* rtc = nullptr;
+#endif
 
    private:
-   /** 
+   /**
    * @brief Target machine's IPv4 address.
    */
    uint32_t target_ip;
@@ -136,7 +143,15 @@ class NYXUS_MITM {
    /**
    * @brief Instantiates the Man-in-the-Middle command module.
    */
-   NYXUS_MITM(bool toggleVerbosity = true, bool timestamp = true, RTC_DS3231* rtc = nullptr): verbose(toggleVerbosity), timestampEnabled(timestamp), rtc(rtc) {}
+   NYXUS_MITM(bool toggleVerbosity = true, bool timestamp = true
+#ifdef _NYXUS_ENABLE_EXTERNAL_RTCLOCK_DEVICE_
+              , RTC_DS3231* rtc = nullptr
+#endif
+              ): verbose(toggleVerbosity), timestampEnabled(timestamp)
+#ifdef _NYXUS_ENABLE_EXTERNAL_RTCLOCK_DEVICE_
+              , rtc(rtc)
+#endif
+   {}
 
    private:
    /**
@@ -208,9 +223,11 @@ class NYXUS_MITM {
 /* IMPLEMENTATIONS - NOTHING HERE */
 
 inline void NYXUS_MITM::timestamp(){
-   if (!timestampEnabled) return;
+#ifdef _NYXUS_ENABLE_EXTERNAL_RTCLOCK_DEVICE_
+   if (!timestampEnabled || !rtc) return;
    DateTime now = rtc->now();
-   Serial.printf("[%s%d-%d-%d %d:%d:%d%s] ", Color::CYAN, now.year(), now.month(), now.day(), now.hour(), now.minute(), now.second(), Color::RESET);
+   printf("[%s%d-%d-%d %d:%d:%d%s] ", Color::CYAN, now.year(), now.month(), now.day(), now.hour(), now.minute(), now.second(), Color::RESET);
+#endif
 }
 
 inline void NYXUS_MITM::parse_mac(const char* mac_str, uint8_t* mac_array) {
@@ -266,9 +283,9 @@ inline void NYXUS_MITM::StartArpSpoof(const std::string& victimIP, const std::st
    inet_pton(AF_INET, victimIP.c_str(), &target_ip);
    inet_pton(AF_INET, gatewayIP.c_str(), &router_ip);
    if (verbose) {
-      Serial.println("===============================");
-      timestamp(); Serial.printf("[%sMITM%s] Igniting Dual-Vector ARP Cache Poisoning...\n", Color::MAGENTA, Color::RESET);
-      timestamp(); Serial.printf("[%sTARGET%s] Forcing %s traffic to route through ESP32.\n", Color::YELLOW, Color::RESET, victimIP.c_str());
+      printf("===============================\n");
+      timestamp(); printf("[%sMITM%s] Igniting Dual-Vector ARP Cache Poisoning...\n", Color::MAGENTA, Color::RESET);
+      timestamp(); printf("[%sTARGET%s] Forcing %s traffic to route through ESP32.\n", Color::YELLOW, Color::RESET, victimIP.c_str());
    }
    arp_active = true;
    xTaskCreatePinnedToCore(arp_poison_task, "ARP_Spoof", 3072, this, 1, &arp_task_handle, 1);
@@ -279,8 +296,8 @@ inline void NYXUS_MITM::StopArpSpoof() {
       arp_active = false;
       while(arp_task_handle != nullptr) vTaskDelay(pdMS_TO_TICKS(10));
       if (verbose) {
-         timestamp(); Serial.printf("[%sSUCCESS%s] ARP Spoofing terminated. Network restoring...\n", Color::GREEN, Color::RESET);
-         Serial.println("===============================");
+         timestamp(); printf("[%sSUCCESS%s] ARP Spoofing terminated. Network restoring...\n", Color::GREEN, Color::RESET);
+         printf("===============================\n");
       }
    }
 }
@@ -336,9 +353,9 @@ inline void NYXUS_MITM::StartEvilTwin(const std::string& captive_portal_ip) {
    if (dns_task_handle != nullptr) return;
    inet_pton(AF_INET, captive_portal_ip.c_str(), &captive_ip_addr);
    if (verbose) {
-      Serial.println("===============================");
-      timestamp(); Serial.printf("[%sEVIL TWIN%s] Igniting Rogue DNS Server...\n", Color::MAGENTA, Color::RESET);
-      timestamp(); Serial.printf("[%sDNS%s] Force-routing all HTTP traffic to %s\n", Color::YELLOW, Color::RESET, captive_portal_ip.c_str());
+      printf("===============================\n");
+      timestamp(); printf("[%sEVIL TWIN%s] Igniting Rogue DNS Server...\n", Color::MAGENTA, Color::RESET);
+      timestamp(); printf("[%sDNS%s] Force-routing all HTTP traffic to %s\n", Color::YELLOW, Color::RESET, captive_portal_ip.c_str());
    }
    dns_active = true;
    xTaskCreatePinnedToCore(dns_spoof_task, "DNS_Spoofer", 4096, this, 1, &dns_task_handle, 1);
@@ -349,8 +366,8 @@ inline void NYXUS_MITM::StopEvilTwin() {
       dns_active = false;
       while(dns_task_handle != nullptr) vTaskDelay(pdMS_TO_TICKS(10));
       if (verbose) {
-         timestamp(); Serial.printf("[%sSUCCESS%s] Rogue DNS Server offline.\n", Color::GREEN, Color::RESET);
-         Serial.println("===============================");
+         timestamp(); printf("[%sSUCCESS%s] Rogue DNS Server offline.\n", Color::GREEN, Color::RESET);
+         printf("===============================\n");
       }
    }
 }

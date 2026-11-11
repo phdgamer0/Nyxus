@@ -35,11 +35,17 @@
 #ifndef _NYXUS_FILE_PARSER_HPP_
 #define _NYXUS_FILE_PARSER_HPP_
 
-#include <Arduino.h>
+#include <Nyxus/nyx_flags.hpp>
 #include <vector>
 #include <string>
-#include <SdFat.h>
+#include <cctype>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <Nyxus/nyx_network_types.hpp>
+
+#ifdef _NYXUS_ENABLE_EXTERNAL_STORAGE_DEVICE_
+#include <SdFat.h>
 
 extern SdFat sd;
 
@@ -90,7 +96,7 @@ inline void NYXUS_FILE_PARSER::Parse(SdFat* sd, const std::string& filepath, Sca
       }
       *write_ptr = '\0';
       if (line[0] == '\0' || (line[0] == '/' && line[1] == '/')) continue;
-      if (line[0] == '-' && line[1] != '\0' && isAlpha(line[1])) {
+      if (line[0] == '-' && line[1] != '\0' && isalpha((unsigned char)line[1])) {
          currentFlag = line[1];
          bool negate = (line[2] == '-');
          if (negate) {
@@ -152,7 +158,7 @@ inline void NYXUS_FILE_PARSER::Parse(SdFat* sd, const std::string& filepath, Con
          currentFlag = '\0';
          continue;
       }
-      if (line[0] == '-' && line[1] != '\0' && isAlpha(line[1])) {
+      if (line[0] == '-' && line[1] != '\0' && isalpha((unsigned char)line[1])) {
          currentFlag = line[1];
          bool negate = (line[2] == '-');
          if (negate) {
@@ -191,5 +197,7 @@ inline void NYXUS_FILE_PARSER::Parse(SdFat* sd, const std::string& filepath, Con
    }
    file.close();
 }
+
+#endif /* _NYXUS_ENABLE_EXTERNAL_STORAGE_DEVICE_ */
 
 #endif

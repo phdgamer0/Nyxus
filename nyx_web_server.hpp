@@ -34,10 +34,11 @@
 #ifndef _NYXUS_WEB_SERVER_HPP_
 #define _NYXUS_WEB_SERVER_HPP_
 
+#include <Nyxus/nyx_flags.hpp>
 #include <Nyxus/nyx_terminal_graphics.hpp>
-#include <SdFat.h>
 #include <array>
 #include <cstdint>
+#include <cstdio>
 #include <esp_http_server.h>
 #include <esp_https_ota.h>
 #include <esp_https_server.h>
@@ -46,9 +47,16 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 #include <freertos/task.h>
-#include <RTClib.h>
 #include <string_view>
 #include <sys/param.h>
+
+#ifdef _NYXUS_ENABLE_EXTERNAL_STORAGE_DEVICE_
+#include <SdFat.h>
+#endif
+
+#ifdef _NYXUS_ENABLE_EXTERNAL_RTCLOCK_DEVICE_
+#include <RTClib.h>
+#endif
 
 using socket_limit = uint8_t;
 using uri_limit = uint8_t;
@@ -91,6 +99,7 @@ class NYXUS_HTTP_SERVER {
    */
    HttpConfig<URI_SIZE, CORE_NUMBER, STACK_SIZE, MAX_CONNECTIONS> config;
 
+#ifdef _NYXUS_ENABLE_EXTERNAL_STORAGE_DEVICE_
    private:
    /**
    * @brief Pointer to the global FAT32 filesystem instance.
@@ -99,15 +108,18 @@ class NYXUS_HTTP_SERVER {
 
    private:
    /**
-   * @brief Pointer to the global real time clock if available
-   */
-   RTC_DS3231* rtc;
-
-   private:
-   /**
    * @brief The absolute root directory path on the filesystem used for resolving file requests.
    */
    char base_path[64]{};
+#endif
+
+#ifdef _NYXUS_ENABLE_EXTERNAL_RTCLOCK_DEVICE_
+   private:
+   /**
+   * @brief Pointer to the global real time clock if available
+   */
+   RTC_DS3231* rtc;
+#endif
 
    private:
    bool verbose;
@@ -120,7 +132,21 @@ class NYXUS_HTTP_SERVER {
    * The server daemon is not started until Start() is explicitly called.
    * @param sd_ptr Pointer to an initialized SdFat instance.
    */
-   NYXUS_HTTP_SERVER(bool verbose = true, SdFat* sd_ptr = nullptr, RTC_DS3231* rtc = nullptr) : verbose(verbose), sd(sd_ptr), rtc(rtc) {}
+   NYXUS_HTTP_SERVER(bool verbose = true
+#ifdef _NYXUS_ENABLE_EXTERNAL_STORAGE_DEVICE_
+                     , SdFat* sd_ptr = nullptr
+#endif
+#ifdef _NYXUS_ENABLE_EXTERNAL_RTCLOCK_DEVICE_
+                     , RTC_DS3231* rtc = nullptr
+#endif
+                     ) : verbose(verbose)
+#ifdef _NYXUS_ENABLE_EXTERNAL_STORAGE_DEVICE_
+                     , sd(sd_ptr)
+#endif
+#ifdef _NYXUS_ENABLE_EXTERNAL_RTCLOCK_DEVICE_
+                     , rtc(rtc)
+#endif
+   {}
 
    public:
    /**
@@ -175,6 +201,7 @@ class NYXUS_HTTP_SERVER {
    */
    [[nodiscard]] inline esp_err_t Stream(httpd_req_t* __restrict req, const char* __restrict str);
 
+#ifdef _NYXUS_ENABLE_EXTERNAL_STORAGE_DEVICE_
    private:
    /**
    * @brief Streams a file from the SD card to the connected client in optimized chunks.
@@ -197,6 +224,7 @@ class NYXUS_HTTP_SERVER {
    * @return esp_err_t ESP_OK after successfully streaming the redirection payload.
    */
    [[nodiscard]] static inline esp_err_t CaptivePortalHandler(httpd_req_t* __restrict req);
+#endif
 };
 
 /* IMPLEMENTATIONS - NOTHING HERE */
@@ -204,7 +232,9 @@ class NYXUS_HTTP_SERVER {
 template <uri_limit URI_SIZE, core_id CORE_NUMBER, size_t STACK_SIZE, socket_limit MAX_CONNECTIONS, size_t BUFF_SIZE>
 [[nodiscard]] inline bool NYXUS_HTTP_SERVER<URI_SIZE, CORE_NUMBER, STACK_SIZE, MAX_CONNECTIONS, BUFF_SIZE>::Start(uint16_t port, const char* __restrict sd_root_path) {
    if (server != nullptr) return true;
+#ifdef _NYXUS_ENABLE_EXTERNAL_STORAGE_DEVICE_
    if (sd_root_path) strlcpy(base_path, sd_root_path, sizeof(base_path));
+#endif
    config.port = port;
    config.global_user_ctx = this;
    httpd_config_t def = HTTPD_DEFAULT_CONFIG();
@@ -230,17 +260,23 @@ template <uri_limit URI_SIZE, core_id CORE_NUMBER, size_t STACK_SIZE, socket_lim
          esp_netif_get_ip_info(netif, &ip_info);
          esp_ip4addr_ntoa(&ip_info.ip, ip_str, sizeof(ip_str));
       }
-      Serial.printf("[%sHTTP%s] Daemon ignited on Core %d.\n", Color::GREEN, Color::RESET, CORE_NUMBER);
-      timestamp();
-      Serial.printf("[%sHTTP%s] Target Access: %shttp://%s:%d%s\n", Color::GREEN, Color::RESET, Color::CYAN, ip_str, port, Color::RESET);
-      if (sd_root_path) {
+      if (verbose) {
+         printf("[%sHTTP%s] Daemon ignited on Core %d.\n", Color::GREEN, Color::RESET, CORE_NUMBER);
          timestamp();
-         Serial.printf("[%sHTTP%s] SD Card Mount: %s\n", Color::GREEN, Color::RESET, base_path);
+         printf("[%sHTTP%s] Target Access: %shttp://%s:%d%s\n", Color::GREEN, Color::RESET, Color::CYAN, ip_str, port, Color::RESET);
+#ifdef _NYXUS_ENABLE_EXTERNAL_STORAGE_DEVICE_
+         if (sd_root_path) {
+            timestamp();
+            printf("[%sHTTP%s] SD Card Mount: %s\n", Color::GREEN, Color::RESET, base_path);
+         }
+#endif
       }
       return true;
    }
-   timestamp();
-   Serial.printf("[%sERROR%s] Failed to allocate HTTP daemon task.\n", Color::RED, Color::RESET);
+   if (verbose) {
+      timestamp();
+      printf("[%sERROR%s] Failed to allocate HTTP daemon task.\n", Color::RED, Color::RESET);
+   }
    return false;
 }
 
@@ -265,9 +301,11 @@ template <uri_limit URI_SIZE, core_id CORE_NUMBER, size_t STACK_SIZE, socket_lim
 
 template <uri_limit URI_SIZE, core_id CORE_NUMBER, size_t STACK_SIZE, socket_limit MAX_CONNECTIONS, size_t BUFF_SIZE>
 inline void NYXUS_HTTP_SERVER<URI_SIZE, CORE_NUMBER, STACK_SIZE, MAX_CONNECTIONS, BUFF_SIZE>::timestamp(){
+#ifdef _NYXUS_ENABLE_EXTERNAL_RTCLOCK_DEVICE_
    if (!rtc) return;
    DateTime now = rtc->now();
-   Serial.printf("[%s%d-%d-%d %d:%d:%d%s] ", Color::CYAN, now.year(), now.month(), now.day(), now.hour(), now.minute(), now.second(), Color::RESET);
+   printf("[%s%d-%d-%d %d:%d:%d%s] ", Color::CYAN, now.year(), now.month(), now.day(), now.hour(), now.minute(), now.second(), Color::RESET);
+#endif
 }
 
 template <uri_limit URI_SIZE, core_id CORE_NUMBER, size_t STACK_SIZE, socket_limit MAX_CONNECTIONS, size_t BUFF_SIZE>
@@ -275,6 +313,7 @@ template <uri_limit URI_SIZE, core_id CORE_NUMBER, size_t STACK_SIZE, socket_lim
    return httpd_resp_sendstr(req, str);
 }
 
+#ifdef _NYXUS_ENABLE_EXTERNAL_STORAGE_DEVICE_
 template <uri_limit URI_SIZE, core_id CORE_NUMBER, size_t STACK_SIZE, socket_limit MAX_CONNECTIONS, size_t BUFF_SIZE>
 [[nodiscard]] inline esp_err_t NYXUS_HTTP_SERVER<URI_SIZE, CORE_NUMBER, STACK_SIZE, MAX_CONNECTIONS, BUFF_SIZE>::StreamFromSD(httpd_req_t* __restrict req, const char* __restrict file_path) {
    char full_path[128] = {0};
@@ -283,7 +322,7 @@ template <uri_limit URI_SIZE, core_id CORE_NUMBER, size_t STACK_SIZE, socket_lim
    if (!file) {
       if (verbose) {
          timestamp();
-         Serial.printf("[%sHTTP%s] 404 File Not Found: %s\n", Color::RED, Color::RESET, full_path);
+         printf("[%sHTTP%s] 404 File Not Found: %s\n", Color::RED, Color::RESET, full_path);
       }
       httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "Payload file not found on SD card.");
       return ESP_FAIL;
@@ -326,5 +365,6 @@ template <uri_limit URI_SIZE, core_id CORE_NUMBER, size_t STACK_SIZE, socket_lim
    if (strstr(uri, ".css") != nullptr || strstr(uri, ".js") != nullptr || strstr(uri, ".png") != nullptr) return server_instance->StreamFromSD(req, uri);
    return server_instance->StreamFromSD(req, "/index.html");
 }
+#endif /* _NYXUS_ENABLE_EXTERNAL_STORAGE_DEVICE_ */
 
 #endif

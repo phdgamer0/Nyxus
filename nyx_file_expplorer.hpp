@@ -43,7 +43,6 @@
 #include <string>
 #include <cstring>
 #include <new>
-#include <HardwareSerial.h>
 #include <Nyxus/nyx_terminal_graphics.hpp>
 
 /**
@@ -833,9 +832,9 @@ inline void NYXUS_FILE_EXPLORER::SetTargetPath(const std::string& Path){
    }
    else last_newline = 0;
    if (c == Key::ESC) {
-      uint32_t timeout = millis();
+      uint32_t timeout = pdTICKS_TO_MS(xTaskGetTickCount());
       while (serial->available() < 2) {
-         if (millis() - timeout > 5) return Key::ESC;
+         if (pdTICKS_TO_MS(xTaskGetTickCount()) - timeout > 5) return Key::ESC;
       }
       if (serial->read() == '[') {
          uint8_t dir = serial->read();

@@ -231,7 +231,7 @@ class NYXUS_SOCKET {
 	NYXUS_SOCKET(domain_t d, type_t t, protocol_t p, bool verbose = false) : address(), Domain(d), Type(t), Protocol(p), Socket(-1) {
 		if ((Socket = static_cast<socket_t>(lwip_socket(Domain, Type, Protocol))) < 0) {
 			if (verbose) {
-				Serial.printf("[%sERROR%s] Failed To create Socket, reason: %s", Color::RED, Color::RESET, displayErr(errno));
+				printf("[%sERROR%s] Failed To create Socket, reason: %s", Color::RED, Color::RESET, displayErr(errno));
 			}
 		}
 	}

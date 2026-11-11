@@ -39,6 +39,7 @@
 #ifndef _NYXUS_BLUETOOTH_HPP_
 #define _NYXUS_BLUETOOTH_HPP_
 
+#include <Nyxus/nyx_flags.hpp>
 #include <Nyxus/nyx_terminal_graphics.hpp>
 #include <esp_bt.h>
 #include <esp_bt_main.h>
@@ -49,8 +50,11 @@
 #include <esp_bt_device.h>
 #include <esp_bt_defs.h>
 #include <nvs_flash.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include <cstdint>
 #include <string_view>
+#include <string>
 #include <cstddef>
 #include <utility>
 #include <algorithm>
@@ -74,9 +78,14 @@ namespace nyx_bt_flags {
     static inline constexpr btstate_t STATE_CONNECTING = 1;
     static inline constexpr btstate_t STATE_CONNECTED = 2;
 
+    /** @brief Alias for the connection-state type used by BluetoothDevice. */
+    using conn_state_t = btstate_t;
+
     using btscan_t = uint8_t;
     static inline constexpr btscan_t SCAN_TYPE_CLASSIC = 0x01;
-    static inline constexpr btscan_t SCAN_TYPE_GATTC = 0x02;
+    static inline constexpr btscan_t SCAN_TYPE_GATTC   = 0x02;
+    static inline constexpr btscan_t SCAN_TYPE_SPP     = SCAN_TYPE_CLASSIC;                 // Classic BT uses the SPP profile
+    static inline constexpr btscan_t SCAN_TYPE_BOTH    = SCAN_TYPE_CLASSIC | SCAN_TYPE_GATTC;
 
     using apple_payload_t = uint8_t;
     static inline constexpr apple_payload_t APPLE_AIRPODS = 0x02;
@@ -163,7 +172,6 @@ class NYXUS_BLUETOOTH {
         * @brief Flag indicating if the device is a BLE device
         */
         bool is_ble{};
-    };
 
         public:
         /**
@@ -337,6 +345,27 @@ class NYXUS_BLUETOOTH {
     */
     nyx_bt_flags::spam_target_t current_spam_target = nyx_bt_flags::SPAM_TARGET_ALL;
 
+    protected:
+    /**
+    * @brief Collected (name, address) pairs from the most recent scan. Owned storage.
+    * @note Written from the GAP callback context during an active scan and read by
+    *       ScanDevices only after the scan window closes, so no lock is used.
+    */
+    std::vector<std::pair<std::string, std::string>> scan_results{};
+
+    protected:
+    /**
+    * @brief Duration (seconds) handed to the BLE scanner once scan params are applied.
+    */
+    uint32_t ble_scan_duration = 10;
+
+    protected:
+    /**
+    * @brief Shared BLE advertising parameters, applied by the GAP callback once raw
+    *        advertising data has been staged (ADV_DATA_RAW_SET_COMPLETE).
+    */
+    static esp_ble_adv_params_t s_ble_adv_params;
+
     /**
     * @brief Index for the RX buffer
     */
@@ -390,10 +419,13 @@ class NYXUS_BLUETOOTH {
     public:
     /**
     * @brief Scans for nearby Bluetooth devices (Classic and/or BLE depending on flags).
-    * @param scan_type Uses nyx_bt_flags (e.g. SCAN_TYPE_SPP, SCAN_TYPE_GATTC).
-    * @return A vector containing pairs of device names and addresses.
+    * @param scan_type Uses nyx_bt_flags (e.g. SCAN_TYPE_SPP, SCAN_TYPE_GATTC, SCAN_TYPE_BOTH).
+    * @param duration_sec How long (in seconds) to let the scan run before returning.
+    * @return A vector of (name, address) pairs with owned string storage. "Unknown" is
+    *         used as the name when a device advertises no resolvable local name.
+    * @attention This call blocks for roughly `duration_sec` while results accumulate.
     */
-    [[nodiscard]] inline std::vector<std::pair<char*, char*>> ScanDevices(nyx_bt_flags::btscan_t scan_type = nyx_bt_flags::SCAN_TYPE_BOTH);
+    [[nodiscard]] inline std::vector<std::pair<std::string, std::string>> ScanDevices(nyx_bt_flags::btscan_t scan_type = nyx_bt_flags::SCAN_TYPE_BOTH, uint32_t duration_sec = 10);
 
     public:
     /**
@@ -569,6 +601,7 @@ class NYXUS_BLUETOOTH {
     */
     inline void SpamDevices(nyx_bt_flags::spam_target_t target = nyx_bt_flags::SPAM_TARGET_ALL, bool enable = true, uint32_t delay_ms = 100);
 
+    #ifdef _NYXUS_ENABLE_EXTERNAL_STORAGE_DEVICE_
     protected:
     /**
     * @brief Enables RX/TX buffer logging to a specified folder on storage.
@@ -597,6 +630,19 @@ class NYXUS_BLUETOOTH {
     * @brief Callback for Bluetooth Low Energy GATTC events
     */
     static void gattc_callback(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp_ble_gattc_cb_param_t *param);
+
+    protected:
+    /**
+    * @brief Callback for BLE GAP events. Drives advertising start-up (once raw adv data is
+    *        staged) and collects scan results into the instance's result buffer.
+    */
+    static void ble_gap_callback(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param);
+
+    protected:
+    /**
+    * @brief Appends a discovered (name, address) pair to scan_results, de-duplicating by address.
+    */
+    inline void add_scan_result(const char* __restrict name, const char* __restrict address);
 
     protected:
     /**
@@ -631,6 +677,18 @@ class NYXUS_BLUETOOTH {
 
 template <uint8_t N, size_t _BUFSIZE, uint8_t MAX_NAME_LEN, uint8_t MAX_PASSWORD_LENGTH, bool ENABLE_CLASSIC, bool ENABLE_BLE>
 NYXUS_BLUETOOTH<N, _BUFSIZE, MAX_NAME_LEN, MAX_PASSWORD_LENGTH, ENABLE_CLASSIC, ENABLE_BLE>* NYXUS_BLUETOOTH<N, _BUFSIZE, MAX_NAME_LEN, MAX_PASSWORD_LENGTH, ENABLE_CLASSIC, ENABLE_BLE>::instance_ptr = nullptr;
+
+template <uint8_t N, size_t _BUFSIZE, uint8_t MAX_NAME_LEN, uint8_t MAX_PASSWORD_LENGTH, bool ENABLE_CLASSIC, bool ENABLE_BLE>
+esp_ble_adv_params_t NYXUS_BLUETOOTH<N, _BUFSIZE, MAX_NAME_LEN, MAX_PASSWORD_LENGTH, ENABLE_CLASSIC, ENABLE_BLE>::s_ble_adv_params = {
+    .adv_int_min       = 0x20,
+    .adv_int_max       = 0x40,
+    .adv_type          = ADV_TYPE_IND,
+    .own_addr_type     = BLE_ADDR_TYPE_RANDOM,
+    .peer_addr         = {0},
+    .peer_addr_type    = BLE_ADDR_TYPE_PUBLIC,
+    .channel_map       = ADV_CHNL_ALL,
+    .adv_filter_policy = ADV_FILTER_ALLOW_SCAN_ANY_CON_ANY,
+};
 
 // =========================================================================================
 // IMPLEMENTATIONS
@@ -718,6 +776,7 @@ inline void NYXUS_BLUETOOTH<N, _BUFSIZE, MAX_NAME_LEN, MAX_PASSWORD_LENGTH, ENAB
     }
     
     if constexpr (ENABLE_BLE) {
+        esp_ble_gap_register_callback(NYXUS_BLUETOOTH::ble_gap_callback);
         esp_ble_gattc_register_callback(NYXUS_BLUETOOTH::gattc_callback);
         esp_ble_gattc_app_register(0); // Application ID
     }
@@ -771,8 +830,33 @@ template <uint8_t N, size_t _BUFSIZE, uint8_t MAX_NAME_LEN, uint8_t MAX_PASSWORD
 inline void NYXUS_BLUETOOTH<N, _BUFSIZE, MAX_NAME_LEN, MAX_PASSWORD_LENGTH, ENABLE_CLASSIC, ENABLE_BLE>::gap_callback(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param) {
     if (!instance_ptr) [[unlikely]] return;
     switch (event) {
-        case ESP_BT_GAP_DISC_RES_EVT:
+        case ESP_BT_GAP_DISC_RES_EVT: {
+            char name[MAX_NAME_LEN]{};
+            // Prefer an explicit device-name property; otherwise resolve the local name from EIR.
+            for (int i = 0; i < param->disc_res.num_prop; ++i) {
+                esp_bt_gap_dev_prop_t& prop = param->disc_res.prop[i];
+                if (prop.type == ESP_BT_GAP_DEV_PROP_BDNAME) {
+                    size_t l = std::min((size_t)prop.len, (size_t)MAX_NAME_LEN - 1);
+                    std::memcpy(name, prop.val, l);
+                    name[l] = '\0';
+                    break;
+                }
+                if (prop.type == ESP_BT_GAP_DEV_PROP_EIR && name[0] == '\0') {
+                    uint8_t len = 0;
+                    uint8_t* data = esp_bt_gap_resolve_eir_data((uint8_t*)prop.val, ESP_BT_EIR_TYPE_CMPL_LOCAL_NAME, &len);
+                    if (!data) data = esp_bt_gap_resolve_eir_data((uint8_t*)prop.val, ESP_BT_EIR_TYPE_SHORT_LOCAL_NAME, &len);
+                    if (data && len) {
+                        size_t l = std::min((size_t)len, (size_t)MAX_NAME_LEN - 1);
+                        std::memcpy(name, data, l);
+                        name[l] = '\0';
+                    }
+                }
+            }
+            char addr[18];
+            NYXUS_BLUETOOTH::bda2str(param->disc_res.bda, addr, sizeof(addr));
+            instance_ptr->add_scan_result(name[0] ? name : "Unknown", addr);
             break;
+        }
         case ESP_BT_GAP_DISC_STATE_CHANGED_EVT:
             break;
         default:
@@ -827,15 +911,72 @@ inline void NYXUS_BLUETOOTH<N, _BUFSIZE, MAX_NAME_LEN, MAX_PASSWORD_LENGTH, ENAB
 }
 
 template <uint8_t N, size_t _BUFSIZE, uint8_t MAX_NAME_LEN, uint8_t MAX_PASSWORD_LENGTH, bool ENABLE_CLASSIC, bool ENABLE_BLE>
-inline std::vector<std::pair<char*, char*>> NYXUS_BLUETOOTH<N, _BUFSIZE, MAX_NAME_LEN, MAX_PASSWORD_LENGTH, ENABLE_CLASSIC, ENABLE_BLE>::ScanDevices(nyx_bt_flags::btscan_t scan_type) {
-    std::vector<std::pair<char*, char*>> results;
+inline void NYXUS_BLUETOOTH<N, _BUFSIZE, MAX_NAME_LEN, MAX_PASSWORD_LENGTH, ENABLE_CLASSIC, ENABLE_BLE>::add_scan_result(const char* __restrict name, const char* __restrict address) {
+    for (const auto& r : scan_results) {
+        if (r.second == address) return; // de-duplicate by MAC address
+    }
+    if (scan_results.size() >= 256) [[unlikely]] return; // sanity cap against runaway buffers
+    scan_results.emplace_back(std::string(name), std::string(address));
+}
+
+template <uint8_t N, size_t _BUFSIZE, uint8_t MAX_NAME_LEN, uint8_t MAX_PASSWORD_LENGTH, bool ENABLE_CLASSIC, bool ENABLE_BLE>
+void NYXUS_BLUETOOTH<N, _BUFSIZE, MAX_NAME_LEN, MAX_PASSWORD_LENGTH, ENABLE_CLASSIC, ENABLE_BLE>::ble_gap_callback(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param) {
+    if constexpr (ENABLE_BLE) {
+        if (!instance_ptr) [[unlikely]] return;
+        switch (event) {
+            // Raw advertising data has been staged -> it is now safe to begin broadcasting.
+            case ESP_GAP_BLE_ADV_DATA_RAW_SET_COMPLETE_EVT:
+                esp_ble_gap_start_advertising(&s_ble_adv_params);
+                break;
+            // Scan parameters applied -> kick off the actual scan for the requested window.
+            case ESP_GAP_BLE_SCAN_PARAM_SET_COMPLETE_EVT:
+                esp_ble_gap_start_scanning(instance_ptr->ble_scan_duration);
+                break;
+            case ESP_GAP_BLE_SCAN_RESULT_EVT: {
+                auto& r = param->scan_rst;
+                if (r.search_evt == ESP_GAP_SEARCH_INQ_RES_EVT) {
+                    uint8_t len = 0;
+                    uint8_t* data = esp_ble_resolve_adv_data(r.ble_adv, ESP_BLE_AD_TYPE_NAME_CMPL, &len);
+                    if (!data) data = esp_ble_resolve_adv_data(r.ble_adv, ESP_BLE_AD_TYPE_NAME_SHORT, &len);
+                    char name[MAX_NAME_LEN]{};
+                    if (data && len) {
+                        size_t l = std::min((size_t)len, (size_t)MAX_NAME_LEN - 1);
+                        std::memcpy(name, data, l);
+                        name[l] = '\0';
+                    }
+                    char addr[18];
+                    NYXUS_BLUETOOTH::bda2str(r.bda, addr, sizeof(addr));
+                    instance_ptr->add_scan_result(name[0] ? name : "Unknown", addr);
+                }
+                break;
+            }
+            default:
+                break;
+        }
+    }
+}
+
+template <uint8_t N, size_t _BUFSIZE, uint8_t MAX_NAME_LEN, uint8_t MAX_PASSWORD_LENGTH, bool ENABLE_CLASSIC, bool ENABLE_BLE>
+inline std::vector<std::pair<std::string, std::string>> NYXUS_BLUETOOTH<N, _BUFSIZE, MAX_NAME_LEN, MAX_PASSWORD_LENGTH, ENABLE_CLASSIC, ENABLE_BLE>::ScanDevices(nyx_bt_flags::btscan_t scan_type, uint32_t duration_sec) {
+    scan_results.clear();
+    if (duration_sec == 0) duration_sec = 1;
+
+    [[maybe_unused]] bool scanning_classic = false;
+    [[maybe_unused]] bool scanning_ble = false;
+
     if constexpr (ENABLE_CLASSIC) {
         if (scan_type & nyx_bt_flags::SCAN_TYPE_SPP) {
-            esp_bt_gap_start_discovery(ESP_BT_INQ_MODE_GENERAL_INQUIRY, 10, 0);
+            // Classic inquiry length is expressed in units of 1.28s; clamp to the valid 0x01..0x30 range.
+            uint32_t units = (duration_sec * 100u) / 128u;
+            if (units < 1)    units = 1;
+            if (units > 0x30) units = 0x30;
+            esp_bt_gap_start_discovery(ESP_BT_INQ_MODE_GENERAL_INQUIRY, (uint8_t)units, 0);
+            scanning_classic = true;
         }
     }
     if constexpr (ENABLE_BLE) {
         if (scan_type & nyx_bt_flags::SCAN_TYPE_GATTC) {
+            ble_scan_duration = duration_sec;
             static esp_ble_scan_params_t ble_scan_params = {
                 .scan_type              = BLE_SCAN_TYPE_ACTIVE,
                 .own_addr_type          = BLE_ADDR_TYPE_PUBLIC,
@@ -844,11 +985,22 @@ inline std::vector<std::pair<char*, char*>> NYXUS_BLUETOOTH<N, _BUFSIZE, MAX_NAM
                 .scan_window            = 0x30,
                 .scan_duplicate         = BLE_SCAN_DUPLICATE_DISABLE
             };
+            // Applying params fires SCAN_PARAM_SET_COMPLETE, where ble_gap_callback starts the scan.
             esp_ble_gap_set_scan_params(&ble_scan_params);
-            esp_ble_gap_start_scanning(10);
+            scanning_ble = true;
         }
     }
-    return results;
+
+    // Block while the asynchronous GAP callbacks accumulate results into scan_results.
+    vTaskDelay(pdMS_TO_TICKS(duration_sec * 1000u + 500u));
+
+    if constexpr (ENABLE_CLASSIC) { if (scanning_classic) esp_bt_gap_cancel_discovery(); }
+    if constexpr (ENABLE_BLE)     { if (scanning_ble)     esp_ble_gap_stop_scanning(); }
+
+    // Allow any in-flight callbacks to drain before reading the shared buffer.
+    vTaskDelay(pdMS_TO_TICKS(200));
+
+    return scan_results;
 }
 
 template <uint8_t N, size_t _BUFSIZE, uint8_t MAX_NAME_LEN, uint8_t MAX_PASSWORD_LENGTH, bool ENABLE_CLASSIC, bool ENABLE_BLE>
@@ -1118,19 +1270,7 @@ inline void NYXUS_BLUETOOTH<N, _BUFSIZE, MAX_NAME_LEN, MAX_PASSWORD_LENGTH, ENAB
         };
 
         esp_ble_gap_config_adv_data_raw(payload, sizeof(payload));
-
-        esp_ble_adv_params_t adv_params = {
-            .adv_int_min       = 0x20,
-            .adv_int_max       = 0x40,
-            .adv_type          = ADV_TYPE_IND,
-            .own_addr_type     = BLE_ADDR_TYPE_RANDOM,
-            .peer_addr         = {0},
-            .peer_addr_type    = BLE_ADDR_TYPE_PUBLIC,
-            .channel_map       = ADV_CHNL_ALL,
-            .adv_filter_policy = ADV_FILTER_ALLOW_SCAN_ANY_CON_ANY,
-        };
-
-        esp_ble_gap_start_advertising(&adv_params);
+        // ble_gap_callback starts advertising once ADV_DATA_RAW_SET_COMPLETE fires.
         printf("[%sBT%s] Broadcasting Apple Device Spoof (ID: %s0x%02X%s)...\n", Color::YELLOW, Color::RESET, Color::MAGENTA, device, Color::RESET);
     }
 }
@@ -1209,19 +1349,7 @@ inline void NYXUS_BLUETOOTH<N, _BUFSIZE, MAX_NAME_LEN, MAX_PASSWORD_LENGTH, ENAB
         };
 
         esp_ble_gap_config_adv_data_raw(payload, 7);
-
-        esp_ble_adv_params_t adv_params = {
-            .adv_int_min       = 0x20,
-            .adv_int_max       = 0x40,
-            .adv_type          = ADV_TYPE_IND,
-            .own_addr_type     = BLE_ADDR_TYPE_RANDOM,
-            .peer_addr         = {0},
-            .peer_addr_type    = BLE_ADDR_TYPE_PUBLIC,
-            .channel_map       = ADV_CHNL_ALL,
-            .adv_filter_policy = ADV_FILTER_ALLOW_SCAN_ANY_CON_ANY,
-        };
-
-        esp_ble_gap_start_advertising(&adv_params);
+        // ble_gap_callback starts advertising once ADV_DATA_RAW_SET_COMPLETE fires.
         printf("[%sBT%s] Broadcasting Windows Swift Pair Spoof...\n", Color::YELLOW, Color::RESET);
     }
 }
@@ -1249,19 +1377,7 @@ inline void NYXUS_BLUETOOTH<N, _BUFSIZE, MAX_NAME_LEN, MAX_PASSWORD_LENGTH, ENAB
         };
 
         esp_ble_gap_config_adv_data_raw(payload, 11);
-
-        esp_ble_adv_params_t adv_params = {
-            .adv_int_min       = 0x20,
-            .adv_int_max       = 0x40,
-            .adv_type          = ADV_TYPE_IND,
-            .own_addr_type     = BLE_ADDR_TYPE_RANDOM,
-            .peer_addr         = {0},
-            .peer_addr_type    = BLE_ADDR_TYPE_PUBLIC,
-            .channel_map       = ADV_CHNL_ALL,
-            .adv_filter_policy = ADV_FILTER_ALLOW_SCAN_ANY_CON_ANY,
-        };
-
-        esp_ble_gap_start_advertising(&adv_params);
+        // ble_gap_callback starts advertising once ADV_DATA_RAW_SET_COMPLETE fires.
         printf("[%sBT%s] Broadcasting Android Fast Pair Spoof (ID: %s0x%06X%s)...\n", Color::YELLOW, Color::RESET, Color::GREEN, device, Color::RESET);
     }
 }
@@ -1287,19 +1403,7 @@ inline void NYXUS_BLUETOOTH<N, _BUFSIZE, MAX_NAME_LEN, MAX_PASSWORD_LENGTH, ENAB
         };
 
         esp_ble_gap_config_adv_data_raw(payload, 15);
-
-        esp_ble_adv_params_t adv_params = {
-            .adv_int_min       = 0x20,
-            .adv_int_max       = 0x40,
-            .adv_type          = ADV_TYPE_IND,
-            .own_addr_type     = BLE_ADDR_TYPE_RANDOM,
-            .peer_addr         = {0},
-            .peer_addr_type    = BLE_ADDR_TYPE_PUBLIC,
-            .channel_map       = ADV_CHNL_ALL,
-            .adv_filter_policy = ADV_FILTER_ALLOW_SCAN_ANY_CON_ANY,
-        };
-
-        esp_ble_gap_start_advertising(&adv_params);
+        // ble_gap_callback starts advertising once ADV_DATA_RAW_SET_COMPLETE fires.
         printf("[%sBT%s] Broadcasting Samsung Galaxy Spoof (ID: %s0x%04X%s)...\n", Color::YELLOW, Color::RESET, Color::CYAN, device, Color::RESET);
     }
 }
